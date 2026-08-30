@@ -700,10 +700,14 @@ QByteArray buildSpeexClip(int rate, int toneHz, double seconds, int *frameSizeOu
     speex_encoder_ctl(state, SPEEX_SET_SAMPLING_RATE, &rateCopy);
     *frameSizeOut = frameSize;
 
+    // M_PI is not in standard C++ and MSVC only defines it with
+    // _USE_MATH_DEFINES, so spell the constant out.
+    constexpr double kPi = 3.14159265358979323846;
+
     const int total = int(rate * seconds);
     QVector<spx_int16_t> input(total);
     for (int i = 0; i < total; ++i)
-        input[i] = spx_int16_t(8000 * std::sin(2.0 * M_PI * toneHz * i / rate));
+        input[i] = spx_int16_t(8000 * std::sin(2.0 * kPi * toneHz * i / rate));
 
     SpeexBits bits;
     speex_bits_init(&bits);

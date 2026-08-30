@@ -20,15 +20,32 @@ $version = (Select-String -Path (Join-Path $root "CMakeLists.txt") -Pattern '^\s
 $name = "qMdict-$version-windows-x86_64"
 $stage = Join-Path $root "dist\$name"
 
-Write-Host ">> configuring"
-cmake -S $root -B $buildDir -G $Generator `
-    -DCMAKE_BUILD_TYPE=$Configuration `
-    -DQMDICT_BUILD_TESTS=ON `
-    -DCMAKE_PREFIX_PATH="$QtPrefix"
+# Arguments are built as an array of fully-quoted strings and splatted.
+# Bare `-DFOO=$Var` arguments are not reliably expanded when the script is
+# dot-sourced the way GitHub Actions invokes it, and CMake then receives the
+# literal text "$Var" as the build type.
+$configureArgs = @(
+    "-S", "$root"
+    "-B", "$buildDir"
+    "-G", "$Generator"
+    "-DCMAKE_BUILD_TYPE=$Configuration"
+    "-DQMDICT_BUILD_TESTS=ON"
+    "-DCMAKE_PREFIX_PATH=$QtPrefix"
+)
+
+Write-Host ">> configuring: cmake $($configureArgs -join ' ')"
+& cmake @configureArgs
 if ($LASTEXITCODE -ne 0) { throw "configure failed" }
 
-Write-Host ">> building"
-cmake --build $buildDir --config $Configuration
+# --config only means something to multi-config generators; passing it to
+# Ninja is harmless but passing it to nothing at all is clearer.
+$buildArgs = @("--build", "$buildDir")
+if ($Generator -like "Visual Studio*") {
+    $buildArgs += @("--config", "$Configuration")
+}
+
+Write-Host ">> building: cmake $($buildArgs -join ' ')"
+& cmake @buildArgs
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
 Write-Host ">> testing"
