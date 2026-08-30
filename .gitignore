@@ -1,0 +1,14 @@
+# Build output
+build/
+build-*/
+dist/
+
+# Locally provisioned toolchain (Qt + extracted dev packages)
+.tools/
+aqtinstall.log
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.user
+.DS_Store

@@ -1,0 +1,4 @@
+// Gives the Windows executable its Explorer/taskbar icon.
+// Configured by CMake so the path to the .ico is absolute and both windres
+// and rc.exe can resolve it regardless of the working directory.
+IDI_ICON1 ICON "@QMDICT_ICO_PATH@"
