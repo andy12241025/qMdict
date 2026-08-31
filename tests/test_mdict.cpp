@@ -887,17 +887,17 @@ void testHtmlBlocks()
     using namespace qmdict::htmlblocks;
 
     // What the stylesheet declares block-level.
-    check(rulesFromStyleSheet(QStringLiteral(".def { display: block; }")).classes.contains("def"),
+    check(rulesFromStyleSheet(QStringLiteral(".def { display: block; }")).blockClasses.contains("def"),
           "a class rule is picked up");
     check(rulesFromStyleSheet(QStringLiteral("top-g{display:block;clear:left}"))
-              .elements.contains("top-g"),
+              .blockElements.contains("top-g"),
           "a custom element rule is picked up");
-    check(rulesFromStyleSheet(QStringLiteral(".a, .b { display: block }")).classes.contains("b"),
+    check(rulesFromStyleSheet(QStringLiteral(".a, .b { display: block }")).blockClasses.contains("b"),
           "grouped selectors are picked up");
 
     // Only the rightmost compound is the rule's target.
-    const BlockRules descendant = rulesFromStyleSheet(QStringLiteral("x-g-blk cf-blk{display:block}"));
-    check(descendant.elements.contains("cf-blk") && !descendant.elements.contains("x-g-blk"),
+    const LayoutRules descendant = rulesFromStyleSheet(QStringLiteral("x-g-blk cf-blk{display:block}"));
+    check(descendant.blockElements.contains("cf-blk") && !descendant.blockElements.contains("x-g-blk"),
           "a descendant selector targets only its rightmost element");
 
     check(rulesFromStyleSheet(QStringLiteral(".c { display: inline }")).isEmpty(),
@@ -918,19 +918,19 @@ void testHtmlBlocks()
           "a pseudo-element rule does not promote its element");
 
     // Comments must not be mistaken for selectors.
-    const BlockRules commented =
+    const LayoutRules commented =
         rulesFromStyleSheet(QStringLiteral("/* cancel the quotes */\nund{display:block}"));
-    check(commented.elements.contains("und") && commented.elements.size() == 1,
+    check(commented.blockElements.contains("und") && commented.blockElements.size() == 1,
           "css comments are stripped before parsing");
 
     check(rulesFromStyleSheet(QStringLiteral("unbox[type=\"colloc\"]{display:block}"))
-              .elements.contains("unbox"),
+              .blockElements.contains("unbox"),
           "attribute selectors still yield their element");
 
     // --- rewriting -------------------------------------------------------
-    BlockRules rules;
-    rules.elements = {QStringLiteral("top-g")};
-    rules.classes = {QStringLiteral("def")};
+    LayoutRules rules;
+    rules.blockElements = {QStringLiteral("top-g")};
+    rules.blockClasses = {QStringLiteral("def")};
 
     // Wrapped, not renamed: the element must survive so element-name CSS
     // selectors keep matching it.
@@ -976,7 +976,52 @@ void testHtmlBlocks()
     checkEqual(adaptForTextDocument(QStringLiteral("<!-- note -->x"), rules).toUtf8(),
                QByteArrayLiteral("<!-- note -->x"), "comments pass through");
 
-    BlockRules none;
+    // --- hidden elements -------------------------------------------------
+    // Oxford hides its BrE/NAmE labels and colours the pronunciation instead;
+    // rendering them anyway jams them against the headword.
+    const LayoutRules hiding =
+        rulesFromStyleSheet(QStringLiteral("pron-g-blk brelabel{padding-left:4px;display:none}"));
+    check(hiding.hiddenElements.contains("brelabel"), "display:none is collected");
+    check(hiding.blockElements.isEmpty(), "display:none is not mistaken for a block");
+
+    LayoutRules hidden;
+    hidden.hiddenElements = {QStringLiteral("brelabel")};
+    hidden.hiddenClasses = {QStringLiteral("gone")};
+
+    checkEqual(adaptForTextDocument(QStringLiteral("a<brelabel>BrE</brelabel> b"), hidden).toUtf8(),
+               QByteArrayLiteral("a b"), "a hidden element and its content are dropped");
+    checkEqual(adaptForTextDocument(QStringLiteral("<span class=\"gone\">x</span>y"), hidden).toUtf8(),
+               QByteArrayLiteral("y"), "a hidden class is dropped");
+    checkEqual(adaptForTextDocument(QStringLiteral("<brelabel><b>x</b><i>y</i></brelabel>z"),
+                                    hidden)
+                   .toUtf8(),
+               QByteArrayLiteral("z"), "nested content inside a hidden element goes too");
+    checkEqual(adaptForTextDocument(QStringLiteral("<brelabel>x"), hidden).toUtf8(),
+               QByteArrayLiteral(""), "an unclosed hidden element swallows the rest");
+
+    // --- links that go nowhere -------------------------------------------
+    check(!isNavigableHref(QStringLiteral("help:bre")), "help: is not a headword link");
+    check(!isNavigableHref(QStringLiteral("helpp:n")), "helpp: is not a headword link");
+    check(!isNavigableHref(QStringLiteral("javascript:x()")), "javascript: is refused");
+    check(!isNavigableHref(QString()), "an empty href is refused");
+    check(isNavigableHref(QStringLiteral("entry://word")), "entry:// is a headword link");
+    check(isNavigableHref(QStringLiteral("bword://word")), "bword:// is a headword link");
+    check(isNavigableHref(QStringLiteral("sound://a.spx")), "sound:// is kept");
+    check(isNavigableHref(QStringLiteral("apple")), "a bare headword is a link");
+    check(isNavigableHref(QStringLiteral("#anchor")), "an in-page anchor is a link");
+    check(isNavigableHref(QStringLiteral("https://example.org")), "https is a link");
+
+    LayoutRules plain;
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:bre\">BrE</a>"), plain).toUtf8(),
+               QByteArrayLiteral("BrE"), "a dead link is unwrapped, keeping its text");
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"entry://x\">x</a>"), plain).toUtf8(),
+               QByteArrayLiteral("<a href=\"entry://x\">x</a>"), "a real link is kept");
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"sound://a.spx\">s</a>"), plain).toUtf8(),
+               QByteArrayLiteral("<a href=\"sound://a.spx\">s</a>"), "an audio link is kept");
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:x\"><b>t</b></a>"), plain).toUtf8(),
+               QByteArrayLiteral("<b>t</b>"), "markup inside a dead link survives");
+
+    LayoutRules none;
     checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a</top-g>"), none).toUtf8(),
                QByteArrayLiteral("<top-g>a</top-g>"), "no rules means no wrapping");
     checkEqual(adaptForTextDocument(QStringLiteral("x<xhtml:br>y"), none).toUtf8(),

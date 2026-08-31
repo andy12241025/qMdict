@@ -46,7 +46,7 @@ inside the unpacked directory and nowhere else; delete the folder and no trace r
 | Move through results | Up/Down arrows work while the cursor stays in the search box |
 | Look up a word you are reading | Double-click it in an article |
 | Follow a cross-reference | Click any link in an article |
-| Back / Forward | `Alt+Left` / `Alt+Right` |
+| Back / Forward | `Alt+Left` / `Alt+Right`, or right-click in an article |
 | Jump to the search box | `Ctrl+L` |
 | Larger / smaller text | `Ctrl++` / `Ctrl+-`, reset with `Ctrl+0` (scales the word list too) |
 | Hide or show the menu bar | `Ctrl+M` |
@@ -177,6 +177,14 @@ a `<div>`. Wrapping rather than renaming is deliberate: these stylesheets select
 name, so turning `<top-g>` into `<div>` would fix the line breaks and lose every colour and font
 the entry had. Tag names carrying an XML namespace, such as `<xhtml:br>` and `<xhtml:a>`, are
 also un-prefixed, since Qt would otherwise drop the line break or the link on the floor.
+
+`display: none` is honoured the same way, by removing the element. Dictionaries use it for
+markup that is not meant to be read — Oxford hides its `BrE` and `NAmE` labels and tints the
+pronunciations blue and brown instead — and showing it anyway crowds the entry with stray
+symbols and labels jammed against the headword.
+
+Links whose scheme belongs to the dictionary's own reader, such as `help:bre` or `helpp:n`, are
+unwrapped to plain text. Left alone they invite a click and then look up nonsense.
 
 One consequence is worth the space it takes. Qt tests every CSS rule against every element, and
 these stylesheets are written for a browser, so most of what they contain — font faces,

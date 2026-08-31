@@ -4,6 +4,9 @@
 #include "theme.h"
 
 #include <QImage>
+#include <QAction>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -49,6 +52,11 @@ ArticleView::ArticleView(QWidget *parent)
             emit externalLinkActivated(url);
             return;
         }
+
+        // Internal links such as "help:bre" or "helpp:n" belong to the
+        // dictionary's own reader. Following them looks up nonsense.
+        if (!htmlblocks::isNavigableHref(raw))
+            return;
 
         // Everything else is a cross-reference to another headword. MDict uses
         // bare hrefs, "entry://word" and "x-dictionary:d:word" interchangeably.
@@ -150,16 +158,16 @@ const QString &ArticleView::usableStyleSheetFor(Dictionary *dictionary, const QS
                                   cssfilter::usable(dictionary->styleSheetFor(articleHtml)));
 }
 
-const htmlblocks::BlockRules &ArticleView::blockRulesFor(Dictionary *dictionary,
+const htmlblocks::LayoutRules &ArticleView::layoutRulesFor(Dictionary *dictionary,
                                                          const QString &articleHtml)
 {
-    const auto cached = m_blockRules.constFind(dictionary);
-    if (cached != m_blockRules.constEnd())
+    const auto cached = m_layoutRules.constFind(dictionary);
+    if (cached != m_layoutRules.constEnd())
         return cached.value();
 
     // Block rules come from the dictionary's own stylesheet, before filtering:
     // `display` is exactly one of the properties the filter strips.
-    return *m_blockRules.insert(
+    return *m_layoutRules.insert(
         dictionary, htmlblocks::rulesFromStyleSheet(dictionary->styleSheetFor(articleHtml)));
 }
 
@@ -190,9 +198,9 @@ void ArticleView::rebuild()
         if (article.first) {
             // Namespace prefixes are fixed even with dictionary styling off,
             // since <xhtml:br> is a line break in any theme.
-            const htmlblocks::BlockRules rules =
-                m_useDictionaryStyles ? blockRulesFor(article.first, article.second)
-                                      : htmlblocks::BlockRules{};
+            const htmlblocks::LayoutRules rules =
+                m_useDictionaryStyles ? layoutRulesFor(article.first, article.second)
+                                      : htmlblocks::LayoutRules{};
             html = htmlblocks::adaptForTextDocument(html, rules);
         }
 
@@ -203,6 +211,44 @@ void ArticleView::rebuild()
     document()->setDefaultStyleSheet(collectStyles());
     setHtml(QStringLiteral("<body>%1</body>").arg(body));
     verticalScrollBar()->setValue(0);
+}
+
+void ArticleView::setNavigationActions(QAction *back, QAction *forward)
+{
+    m_backAction = back;
+    m_forwardAction = forward;
+}
+
+void ArticleView::contextMenuEvent(QContextMenuEvent *event)
+{
+    QMenu *menu = createStandardContextMenu(event->pos());
+    if (!menu) {
+        QTextBrowser::contextMenuEvent(event);
+        return;
+    }
+
+    if (m_backAction || m_forwardAction) {
+        QAction *first = menu->actions().value(0);
+        if (m_forwardAction)
+            menu->insertAction(first, m_forwardAction);
+        if (m_backAction)
+            menu->insertAction(m_forwardAction ? m_forwardAction : first, m_backAction);
+        if (first)
+            menu->insertSeparator(first);
+    }
+
+    // Offer the selected text as a lookup, which is the other thing a reader
+    // reaches for after highlighting a word.
+    const QString selection = textCursor().selectedText().trimmed();
+    if (!selection.isEmpty() && selection.size() <= 64) {
+        menu->addSeparator();
+        QAction *lookup = menu->addAction(QStringLiteral("Look Up \"%1\"").arg(selection));
+        connect(lookup, &QAction::triggered, this,
+                [this, selection]() { emit wordLookupRequested(selection); });
+    }
+
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(event->globalPos());
 }
 
 void ArticleView::mouseDoubleClickEvent(QMouseEvent *event)

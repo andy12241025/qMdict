@@ -41,6 +41,10 @@ public:
 
     void refreshTheme();
 
+    // Offered at the top of the context menu, so navigation stays reachable
+    // when the menu bar is hidden.
+    void setNavigationActions(QAction *back, QAction *forward);
+
 signals:
     void wordActivated(const QString &word);
 
@@ -53,6 +57,7 @@ signals:
 protected:
     QVariant loadResource(int type, const QUrl &name) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
     void rebuild();
@@ -65,13 +70,15 @@ private:
 
     // Parsing a dictionary's stylesheet is not free, and it never changes
     // while the dictionary is open.
-    const htmlblocks::BlockRules &blockRulesFor(Dictionary *dictionary, const QString &articleHtml);
+    const htmlblocks::LayoutRules &layoutRulesFor(Dictionary *dictionary, const QString &articleHtml);
 
     QString m_word;
     QVector<QPair<Dictionary *, QString>> m_articles;
     bool m_useDictionaryStyles = true;
     qreal m_fontPointSize = kDefaultFontPointSize;
-    QHash<Dictionary *, htmlblocks::BlockRules> m_blockRules;
+    QAction *m_backAction = nullptr;
+    QAction *m_forwardAction = nullptr;
+    QHash<Dictionary *, htmlblocks::LayoutRules> m_layoutRules;
     QHash<Dictionary *, QString> m_usableStyles;
 };
 

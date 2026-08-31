@@ -206,6 +206,13 @@ void MainWindow::buildActions()
     goMenu->addSeparator();
     goMenu->addAction(focusAction);
 
+    // Shortcuts on a menu action stop working when the menu bar is hidden, so
+    // the window owns these too, and they are offered on right-click.
+    addAction(m_backAction);
+    addAction(m_forwardAction);
+    addAction(focusAction);
+    m_article->setNavigationActions(m_backAction, m_forwardAction);
+
     auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     auto *themeMenu = viewMenu->addMenu(QStringLiteral("&Theme"));
     auto *themeGroup = new QActionGroup(this);
