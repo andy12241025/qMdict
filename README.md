@@ -178,10 +178,12 @@ name, so turning `<top-g>` into `<div>` would fix the line breaks and lose every
 the entry had. Tag names carrying an XML namespace, such as `<xhtml:br>` and `<xhtml:a>`, are
 also un-prefixed, since Qt would otherwise drop the line break or the link on the floor.
 
-`display: none` is honoured the same way, by removing the element. Dictionaries use it for
-markup that is not meant to be read — Oxford hides its `BrE` and `NAmE` labels and tints the
-pronunciations blue and brown instead — and showing it anyway crowds the entry with stray
-symbols and labels jammed against the headword.
+`display: none` and `visibility: hidden` are honoured the same way, by removing the element.
+Dictionaries use both for markup that is not meant to be read. Oxford hides its `BrE` and `NAmE`
+labels and tints the pronunciations blue and brown instead, and blanks the literal 🔑 in front of
+a headword so it can draw the same key from an embedded icon font. Qt renders neither the icon
+nor nothing, so left alone the raw character surfaces — as two missing-glyph boxes, one per half
+of its surrogate pair.
 
 Links whose scheme belongs to the dictionary's own reader, such as `help:bre` or `helpp:n`, are
 unwrapped to plain text. Left alone they invite a click and then look up nonsense.

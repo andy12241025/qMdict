@@ -144,6 +144,11 @@ LayoutRules rulesFromStyleSheet(const QString &css)
     static const QRegularExpression display(
         QStringLiteral("(?:^|;)\\s*display\\s*:\\s*([^;!]+)"),
         QRegularExpression::CaseInsensitiveOption);
+    // Anchored after a semicolon or the start so the old IE hacks these
+    // stylesheets are full of -- "*visibility", "_visibility" -- are ignored.
+    static const QRegularExpression visibility(
+        QStringLiteral("(?:^|;)\\s*visibility\\s*:\\s*([^;!]+)"),
+        QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression comment(QStringLiteral("/\\*.*?\\*/"),
                                             QRegularExpression::DotMatchesEverythingOption);
 
@@ -153,15 +158,29 @@ LayoutRules rulesFromStyleSheet(const QString &css)
     auto it = rule.globalMatch(clean);
     while (it.hasNext()) {
         const QRegularExpressionMatch match = it.next();
-        const QRegularExpressionMatch declaration = display.match(match.captured(2));
-        if (!declaration.hasMatch())
+        const QRegularExpressionMatch shown = display.match(match.captured(2));
+        const QRegularExpressionMatch visible = visibility.match(match.captured(2));
+        if (!shown.hasMatch() && !visible.hasMatch())
             continue;
 
         const QString selector = match.captured(1);
         if (selector.contains(QLatin1Char('@'))) // @media and friends
             continue;
 
-        const QString value = declaration.captured(1).trimmed().toLower();
+        // "visibility: hidden" is how these stylesheets blank out a character
+        // they intend to replace with an icon-font glyph: Oxford hides the
+        // literal key emoji in front of a headword this way. Qt draws neither
+        // the icon nor nothing, so the raw emoji leaks onto the page.
+        if (visible.hasMatch() &&
+            visible.captured(1).trimmed().compare(QLatin1String("hidden"), Qt::CaseInsensitive) == 0) {
+            collectTargets(selector, &rules.hiddenClasses, &rules.hiddenElements);
+            continue;
+        }
+
+        if (!shown.hasMatch())
+            continue;
+
+        const QString value = shown.captured(1).trimmed().toLower();
         if (isBlockDisplay(value))
             collectTargets(selector, &rules.blockClasses, &rules.blockElements);
         else if (value == QLatin1String("none"))

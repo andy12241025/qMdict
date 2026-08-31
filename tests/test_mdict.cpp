@@ -984,6 +984,23 @@ void testHtmlBlocks()
     check(hiding.hiddenElements.contains("brelabel"), "display:none is collected");
     check(hiding.blockElements.isEmpty(), "display:none is not mistaken for a block");
 
+    // Oxford blanks the literal key emoji in front of a headword this way and
+    // substitutes an icon-font glyph Qt cannot draw, so the emoji leaked out
+    // as two missing-glyph boxes (one per UTF-16 half).
+    const LayoutRules blanked =
+        rulesFromStyleSheet(QStringLiteral("symbol[type=key]{color:OrangeRed;visibility:hidden}"));
+    check(blanked.hiddenElements.contains("symbol"), "visibility:hidden is collected");
+
+    // The same stylesheets carry old IE hacks that must not be mistaken for it.
+    const LayoutRules hacks = rulesFromStyleSheet(
+        QStringLiteral("x{visibility:hidden;*visibility:visible !important;"
+                       "_visibility:visible !important}"));
+    check(hacks.hiddenElements.contains("x"), "the real declaration still wins over IE hacks");
+    check(rulesFromStyleSheet(QStringLiteral("y{*visibility:hidden}")).isEmpty(),
+          "an IE-hack property alone hides nothing");
+    check(rulesFromStyleSheet(QStringLiteral("z{visibility:visible}")).isEmpty(),
+          "visibility:visible hides nothing");
+
     LayoutRules hidden;
     hidden.hiddenElements = {QStringLiteral("brelabel")};
     hidden.hiddenClasses = {QStringLiteral("gone")};
