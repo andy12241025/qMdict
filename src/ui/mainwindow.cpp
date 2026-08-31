@@ -592,11 +592,14 @@ void MainWindow::showAbout()
 {
     QMessageBox::about(
         this, QStringLiteral("About qMdict"),
-        QStringLiteral("<h3>qMdict</h3>"
+        QStringLiteral("<h3>qMdict %1</h3>"
                        "<p>A small, fast offline reader for MDict (.mdx / .mdd) dictionaries.</p>"
-                       "<p>Built with Qt %1. Only the headword index is kept in memory; "
-                       "articles are decompressed on demand.</p>")
-            .arg(QString::fromLatin1(qVersion())));
+                       "<p>Only the headword index is kept in memory; articles are decompressed "
+                       "on demand.</p>"
+                       "<p>Built with Qt %2. MIT licensed.<br>"
+                       "<a href=\"https://github.com/andy12241025/qMdict\">"
+                       "github.com/andy12241025/qMdict</a></p>")
+            .arg(QCoreApplication::applicationVersion(), QString::fromLatin1(qVersion())));
 }
 
 void MainWindow::openExternal(const QUrl &url)

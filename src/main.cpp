@@ -5,6 +5,10 @@
 #include <QDir>
 #include <QIcon>
 #include <QSettings>
+
+#ifndef QMDICT_VERSION
+#  define QMDICT_VERSION "0.0.0-dev"
+#endif
 #include <QStandardPaths>
 
 namespace {
@@ -43,7 +47,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("qMdict"));
     QCoreApplication::setOrganizationName(QStringLiteral("qMdict"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.0.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(QMDICT_VERSION));
 
     // Every size is registered so window decorations, the task switcher and
     // the taskbar each pick the one they need instead of rescaling.
