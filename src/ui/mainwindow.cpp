@@ -25,6 +25,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStringListModel>
+#include <QSystemTrayIcon>
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QToolBar>
@@ -36,6 +37,18 @@ namespace {
 
 constexpr int kSuggestionLimit = 400;
 constexpr int kSearchDelayMs = 120;
+
+// Qt treats a sequence listed twice on one action as ambiguous and then
+// triggers neither, so overlapping spellings have to be collapsed.
+QList<QKeySequence> distinctShortcuts(std::initializer_list<QKeySequence> candidates)
+{
+    QList<QKeySequence> result;
+    for (const QKeySequence &candidate : candidates) {
+        if (!candidate.isEmpty() && !result.contains(candidate))
+            result.append(candidate);
+    }
+    return result;
+}
 
 QString formatBytes(qint64 bytes)
 {
@@ -56,6 +69,7 @@ MainWindow::MainWindow(const QString &cacheDir, QWidget *parent)
     buildUi();
     buildActions();
     restoreSettings();
+    setupTrayIcon();
 
     connect(&m_library, &Library::loadingStarted, this, [this](int total) {
         m_status->setText(QStringLiteral("Indexing %1 dictionaries...").arg(total));
@@ -182,12 +196,18 @@ void MainWindow::buildActions()
                    QKeySequence::Open);
     auto *reloadAction =
         makeAction(QStringLiteral("&Reload"), &MainWindow::reloadLibrary, QKeySequence::Refresh);
-    auto *quitAction = makeAction(QStringLiteral("&Quit"), [this]() { close(); }, QKeySequence::Quit);
+    auto *quitAction =
+        makeAction(QStringLiteral("&Quit"), &MainWindow::quitApplication, QKeySequence::Quit);
+
+    m_closeToTrayAction = new QAction(QStringLiteral("Close to System &Tray"), this);
+    m_closeToTrayAction->setCheckable(true);
+    m_closeToTrayAction->setChecked(true);
 
     auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
     fileMenu->addAction(openAction);
     fileMenu->addAction(reloadAction);
     fileMenu->addSeparator();
+    fileMenu->addAction(m_closeToTrayAction);
     fileMenu->addAction(quitAction);
 
     m_backAction = makeAction(QStringLiteral("&Back"), &MainWindow::goBack, QKeySequence::Back);
@@ -206,11 +226,6 @@ void MainWindow::buildActions()
     goMenu->addSeparator();
     goMenu->addAction(focusAction);
 
-    // Shortcuts on a menu action stop working when the menu bar is hidden, so
-    // the window owns these too, and they are offered on right-click.
-    addAction(m_backAction);
-    addAction(m_forwardAction);
-    addAction(focusAction);
     m_article->setNavigationActions(m_backAction, m_forwardAction);
 
     auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
@@ -243,11 +258,17 @@ void MainWindow::buildActions()
                                        &MainWindow::resetFontSize,
                                        QKeySequence(QStringLiteral("Ctrl+0")));
 
-    // Ctrl+= and Ctrl+Plus reach the same key on different layouts, and
-    // QKeySequence::ZoomIn only covers one of them.
-    biggerAction->setShortcuts({QKeySequence::ZoomIn, QKeySequence(QStringLiteral("Ctrl+=")),
-                                QKeySequence(QStringLiteral("Ctrl++"))});
-    smallerAction->setShortcuts({QKeySequence::ZoomOut, QKeySequence(QStringLiteral("Ctrl+-"))});
+    // Ctrl+= and Ctrl+Plus are the same physical key on different layouts and
+    // QKeySequence::ZoomIn covers only one, so all the spellings are offered.
+    // They must be de-duplicated first: the standard keys already expand to
+    // Ctrl++ and Ctrl+-, and listing a sequence twice on one action makes Qt
+    // call it ambiguous and fire nothing, which is why Ctrl+- never worked.
+    biggerAction->setShortcuts(distinctShortcuts({QKeySequence::ZoomIn,
+                                                  QKeySequence(QStringLiteral("Ctrl+=")),
+                                                  QKeySequence(QStringLiteral("Ctrl++"))}));
+    smallerAction->setShortcuts(distinctShortcuts({QKeySequence::ZoomOut,
+                                                   QKeySequence(QStringLiteral("Ctrl+-")),
+                                                   QKeySequence(QStringLiteral("Ctrl+_"))}));
 
     auto *fontMenu = viewMenu->addMenu(QStringLiteral("&Font Size"));
     fontMenu->addAction(biggerAction);
@@ -278,6 +299,14 @@ void MainWindow::buildActions()
 
     auto *helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
     helpMenu->addAction(makeAction(QStringLiteral("&About qMdict"), &MainWindow::showAbout));
+
+    // A shortcut carried only by a menu action stops working the moment the
+    // menu bar is hidden. Giving the window every shortcut-bearing action
+    // fixes that once, rather than one action at a time.
+    for (QAction *action : findChildren<QAction *>()) {
+        if (!action->shortcuts().isEmpty() && !actions().contains(action))
+            addAction(action);
+    }
 
     updateHistoryActions();
 
@@ -324,6 +353,9 @@ void MainWindow::restoreSettings()
     m_menuBarAction->setChecked(menuBarVisible);
     menuBar()->setVisible(menuBarVisible);
 
+    m_closeToTrayAction->setChecked(
+        settings.value(QStringLiteral("ui/closeToTray"), true).toBool());
+
     if (settings.contains(QStringLiteral("ui/geometry")))
         restoreGeometry(settings.value(QStringLiteral("ui/geometry")).toByteArray());
     if (settings.contains(QStringLiteral("ui/splitter")))
@@ -348,15 +380,84 @@ void MainWindow::saveSettings()
     settings.setValue(QStringLiteral("ui/dictionaryStyles"), m_dictionaryStylesAction->isChecked());
     settings.setValue(QStringLiteral("ui/fontPointSize"), m_article->fontPointSize());
     settings.setValue(QStringLiteral("ui/menuBar"), m_menuBarAction->isChecked());
+    settings.setValue(QStringLiteral("ui/closeToTray"), m_closeToTrayAction->isChecked());
     settings.setValue(QStringLiteral("ui/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("ui/splitter"), m_splitter->saveState());
 }
 
+void MainWindow::setupTrayIcon()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        return;
+
+    m_tray = new QSystemTrayIcon(QApplication::windowIcon(), this);
+    m_tray->setToolTip(QStringLiteral("qMdict"));
+
+    auto *menu = new QMenu(this);
+    auto *show = menu->addAction(QStringLiteral("Show qMdict"));
+    connect(show, &QAction::triggered, this, &MainWindow::toggleWindowVisible);
+    menu->addSeparator();
+    auto *quit = menu->addAction(QStringLiteral("Quit"));
+    connect(quit, &QAction::triggered, this, &MainWindow::quitApplication);
+
+    m_tray->setContextMenu(menu);
+    connect(m_tray, &QSystemTrayIcon::activated, this,
+            [this](QSystemTrayIcon::ActivationReason reason) {
+                if (reason == QSystemTrayIcon::Trigger ||
+                    reason == QSystemTrayIcon::DoubleClick)
+                    toggleWindowVisible();
+            });
+
+    m_tray->show();
+}
+
+void MainWindow::toggleWindowVisible()
+{
+    if (isVisible() && !isMinimized()) {
+        hide();
+        return;
+    }
+
+    showNormal();
+    raise();
+    activateWindow();
+    m_search->setFocus();
+}
+
+void MainWindow::quitApplication()
+{
+    m_quitting = true;
+    close();
+}
+
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    // Settings are written on the way to the tray as well, so a later kill or
+    // power loss does not lose them.
     saveSettings();
+
+    if (!m_quitting && m_tray && m_closeToTrayAction->isChecked()) {
+        hide();
+        event->ignore();
+
+        if (!m_trayHintShown) {
+            m_trayHintShown = true;
+            m_tray->showMessage(QStringLiteral("qMdict is still running"),
+                                QStringLiteral("Click the tray icon to bring it back, or use "
+                                               "Quit there to close it."),
+                                QSystemTrayIcon::Information, 4000);
+        }
+        return;
+    }
+
     m_library.cancelLoading();
+    if (m_tray)
+        m_tray->hide();
     QMainWindow::closeEvent(event);
+
+    // Nothing keeps the process alive once the window is really gone, because
+    // quitting on the last window is switched off for the tray's sake.
+    QCoreApplication::quit();
 }
 
 void MainWindow::applyTheme(theme::Mode mode)

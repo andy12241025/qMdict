@@ -49,6 +49,10 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("qMdict"));
     QCoreApplication::setApplicationVersion(QStringLiteral(QMDICT_VERSION));
 
+    // The window hides to the tray instead of closing, so the process must
+    // not exit with it. MainWindow quits explicitly when it really closes.
+    QApplication::setQuitOnLastWindowClosed(false);
+
     // Every size is registered so window decorations, the task switcher and
     // the taskbar each pick the one they need instead of rescaling.
     QIcon icon;

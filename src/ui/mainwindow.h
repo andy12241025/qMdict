@@ -14,6 +14,7 @@ class QLineEdit;
 class QListView;
 class QSplitter;
 class QStringListModel;
+class QSystemTrayIcon;
 class QTimer;
 
 namespace qmdict {
@@ -49,6 +50,8 @@ private slots:
     void changeFontSize(qreal delta);
     void resetFontSize();
     void setMenuBarVisible(bool visible);
+    void toggleWindowVisible();
+    void quitApplication();
 
 private:
     void buildUi();
@@ -60,6 +63,8 @@ private:
 
     // Applies `points` to the article and scales the result list to match.
     void applyFontPointSize(qreal points);
+
+    void setupTrayIcon();
     void restoreSettings();
     void saveSettings();
     void applyTheme(theme::Mode mode);
@@ -83,7 +88,12 @@ private:
     QAction *m_forwardAction = nullptr;
     QAction *m_dictionaryStylesAction = nullptr;
     QAction *m_menuBarAction = nullptr;
+    QAction *m_closeToTrayAction = nullptr;
     QVector<QAction *> m_themeActions;
+
+    QSystemTrayIcon *m_tray = nullptr;
+    bool m_quitting = false;
+    bool m_trayHintShown = false;
 
     QStringList m_history;
     int m_historyPosition = -1;

@@ -18,6 +18,8 @@ few tens of megabytes of RAM rather than a gigabyte.
   and played directly, with no "open with" prompt and no media framework to install.
 - **Adjustable text size.** `Ctrl` and `+`/`-` resize both the article and the word list; the
   setting is remembered. Double-clicking any word in an article looks it up.
+- **Stays out of the way.** Closing the window hides it to the system tray so the index stays
+  warm and the next lookup is instant; turn that off under **File → Close to System Tray**.
 - **Low memory and fast startup.** Only the headword index lives in RAM; articles are inflated
   on demand into a small LRU cache. The index is cached on disk after the first open, so
   subsequent launches are effectively instant.
@@ -50,6 +52,7 @@ inside the unpacked directory and nowhere else; delete the folder and no trace r
 | Jump to the search box | `Ctrl+L` |
 | Larger / smaller text | `Ctrl++` / `Ctrl+-`, reset with `Ctrl+0` (scales the word list too) |
 | Hide or show the menu bar | `Ctrl+M` |
+| Close to the tray / quit | Closing hides to the system tray; **File → Quit** exits |
 | Hear a pronunciation | Click the speaker link in an article |
 | Enable or disable dictionaries | **View → Dictionaries…** |
 | Switch theme | **View → Theme** |
