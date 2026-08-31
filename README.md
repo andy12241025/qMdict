@@ -6,6 +6,8 @@ Point it at a folder, and every dictionary underneath it — at any depth — be
 from a single box. Nothing is uploaded, nothing is installed, and a 1 GB dictionary costs a
 few tens of megabytes of RAM rather than a gigabyte.
 
+![qMdict showing the same word in two dictionaries](docs/screenshot.png)
+
 ## Features
 
 - **Offline lookup across a whole folder tree.** `.mdx` files are discovered recursively, and
@@ -40,6 +42,26 @@ Then use **File → Open Dictionary Folder** and select the folder holding your 
 
 In portable mode, settings and the headword index cache are written to the `data/` folder
 inside the unpacked directory and nowhere else; delete the folder and no trace remains.
+
+## Getting dictionaries
+
+qMdict ships no dictionaries of its own — it reads the MDict `.mdx` / `.mdd` files you already
+have. A set to get started with is available here:
+
+**[Dictionary downloads (Google Drive)](https://drive.google.com/drive/folders/1jXxS5NIIXQxhr3M-XHtuZBmesX-6p3LN?usp=sharing)**
+
+Put each dictionary in its own folder, keeping the `.mdx` beside its `.mdd` and any `.css` that
+came with it, then point **File → Open Dictionary Folder** at the folder above them all:
+
+```
+Dict/
+├── Cambridge/
+│   ├── C3.mdx
+│   └── C3.mdd
+└── Oxford/
+    ├── O2.mdx
+    └── O2.mdd
+```
 
 ## Using it
 
