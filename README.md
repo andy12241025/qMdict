@@ -49,6 +49,7 @@ inside the unpacked directory and nowhere else; delete the folder and no trace r
 | Back / Forward | `Alt+Left` / `Alt+Right` |
 | Jump to the search box | `Ctrl+L` |
 | Larger / smaller text | `Ctrl++` / `Ctrl+-`, reset with `Ctrl+0` (scales the word list too) |
+| Hide or show the menu bar | `Ctrl+M` |
 | Hear a pronunciation | Click the speaker link in an article |
 | Enable or disable dictionaries | **View → Dictionaries…** |
 | Switch theme | **View → Theme** |
@@ -156,14 +157,26 @@ validated against the real file size before it is used to allocate, and the read
 fuzzed with tens of thousands of truncated and bit-flipped dictionaries under
 AddressSanitizer and UndefinedBehaviorSanitizer.
 
-### Dark mode and dictionary styling
+### Dictionary styling
 
-Dictionaries are written on the assumption of a white page, so their own stylesheets happily
-use navy or plain blue for example sentences — invisible against a dark background. Rather than
-throwing that styling away, qMdict rewrites each colour it finds in a dictionary's stylesheet
-and inline markup, raising text to a readable lightness while keeping its hue, and darkening
-panels that were meant to be pale. Only stylesheet declarations and attribute values are
-touched, never article prose. If you would rather have plain theme colours, turn off
+A dictionary's stylesheet decides almost everything about how its entries read, so qMdict goes
+to some length to honour it.
+
+It is located from the `<link rel="stylesheet">` tag in the article, looking first inside the
+`.mdd` archives and then for a plain file beside the `.mdx` — both are common, and dictionaries
+that keep it loose on disk would otherwise render as one unbroken paragraph.
+
+That paragraph problem has a second cause worth knowing about. `QTextDocument` decides block
+versus inline layout from the element name alone: a `display: block` on a `<span>` is ignored
+however it is delivered. Dictionaries such as Oxford build an entire entry out of styled
+`<span>`s, so qMdict reads which classes the stylesheet lays out as blocks and rewrites exactly
+those spans as `<div>`s before rendering.
+
+Finally, dictionaries assume a white page, so in dark mode their colours are remapped: text is
+raised to a readable lightness with its hue intact, and panels meant to be pale are darkened.
+Only stylesheet declarations and attribute values are touched, never article prose.
+
+If you would rather have plain theme colours and layout, turn off
 **View → Use Dictionary Styles**.
 
 ## Third-party code

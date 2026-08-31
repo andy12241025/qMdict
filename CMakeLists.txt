@@ -51,6 +51,7 @@ add_library(qmdict_core STATIC
     src/audio/oggstream.cpp
     src/audio/audiodecoder.cpp
     src/ui/darkcolours.cpp
+    src/ui/htmlblocks.cpp
 )
 
 target_include_directories(qmdict_core PRIVATE third_party/minimp3)

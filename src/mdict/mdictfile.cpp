@@ -16,7 +16,8 @@ namespace qmdict {
 namespace {
 
 constexpr quint32 kCacheMagic = 0x514d4449; // "QMDI"
-constexpr quint32 kCacheVersion = 1;
+// Bumped to 2 so caches holding an unfiltered placeholder title are discarded.
+constexpr quint32 kCacheVersion = 2;
 constexpr qint64 kBlockCacheLimit = 16 * 1024 * 1024;
 
 inline char fold(char c)
@@ -195,8 +196,18 @@ bool MdictFile::readHeader(QString *error)
     // header claims.
     m_decoder = TextDecoder(m_isMdd ? QStringLiteral("UTF-16") : m_encodingName);
 
-    if (m_title.isEmpty())
+    // MdxBuilder leaves its own field labels in the header when the author
+    // never filled them in, so "Title (No HTML code allowed)" is a placeholder
+    // rather than a name. Fall back to the file name in that case.
+    const QString trimmedTitle = m_title.trimmed();
+    if (trimmedTitle.isEmpty() ||
+        trimmedTitle.contains(QLatin1String("No HTML code allowed"), Qt::CaseInsensitive) ||
+        trimmedTitle.compare(QLatin1String("Title"), Qt::CaseInsensitive) == 0) {
         m_title = QFileInfo(m_path).completeBaseName();
+    }
+
+    if (m_description.trimmed().contains(QLatin1String("HTML code allowed"), Qt::CaseInsensitive))
+        m_description.clear();
 
     m_keySectionPos = qint64(4 + headerLength + 4);
     return true;

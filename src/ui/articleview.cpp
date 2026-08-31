@@ -125,7 +125,9 @@ QString ArticleView::collectStyles() const
     for (const auto &article : m_articles) {
         if (!article.first)
             continue;
-        const QString embedded = article.first->embeddedStyleSheet();
+        // Resolved from the article's own <link> tags, which is why this uses
+        // the raw HTML rather than the sanitised copy.
+        const QString embedded = article.first->styleSheetFor(article.second);
         if (!embedded.isEmpty())
             css += QLatin1Char('\n') + theme::adaptStyleSheetForDark(embedded);
     }
@@ -133,6 +135,17 @@ QString ArticleView::collectStyles() const
     // The theme rules come last so headword colours stay readable even when a
     // dictionary stylesheet assumes a white page.
     return css + QLatin1Char('\n') + base;
+}
+
+const htmlblocks::BlockRules &ArticleView::blockRulesFor(Dictionary *dictionary,
+                                                         const QString &articleHtml)
+{
+    const auto cached = m_blockRules.constFind(dictionary);
+    if (cached != m_blockRules.constEnd())
+        return cached.value();
+
+    return *m_blockRules.insert(
+        dictionary, htmlblocks::rulesFromStyleSheet(dictionary->styleSheetFor(articleHtml)));
 }
 
 QString ArticleView::sanitise(const QString &html)
@@ -157,7 +170,12 @@ void ArticleView::rebuild()
     for (const auto &article : m_articles) {
         const QString name = article.first ? article.first->title() : QString();
         body += QStringLiteral("<p class=\"qmdict-source\">%1</p>\n").arg(name.toHtmlEscaped());
-        body += sanitise(article.second);
+
+        QString html = sanitise(article.second);
+        if (m_useDictionaryStyles && article.first)
+            html = htmlblocks::promoteSpans(html, blockRulesFor(article.first, article.second));
+
+        body += html;
         body += QLatin1String("\n");
     }
 

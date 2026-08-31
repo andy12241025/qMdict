@@ -50,20 +50,26 @@ public:
     // and may omit the leading separator.
     QByteArray resource(const QString &name);
 
-    // The dictionary's own CSS, taken from the first .css found in its .mdd
-    // archives (many MDX files reference one with a <link> tag).
-    QString embeddedStyleSheet();
+    // The dictionary's own CSS for `articleHtml`, resolved from the
+    // <link rel="stylesheet"> tags the article carries. Dictionaries ship this
+    // either inside their .mdd or as a plain file beside the .mdx, and getting
+    // it wrong is what turns a formatted entry into a wall of text.
+    QString styleSheetFor(const QString &articleHtml);
 
 private:
     QString decodeRecord(const QByteArray &raw) const;
     QString applyStyleSheet(const QString &text) const;
 
+    QString loadStyleSheet(const QString &name);
+    QString fallbackStyleSheet();
+
     std::unique_ptr<MdictFile> m_mdx;
     std::vector<std::unique_ptr<MdictFile>> m_mdd;
     QHash<QString, QPair<QString, QString>> m_styleRules; // id -> (prefix, suffix)
     bool m_enabled = true;
-    bool m_cssProbed = false;
-    QString m_css;
+    QHash<QString, QString> m_styleSheets; // href -> css, empty when unresolved
+    bool m_fallbackProbed = false;
+    QString m_fallback;
 };
 
 } // namespace qmdict

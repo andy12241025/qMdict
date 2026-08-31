@@ -254,20 +254,23 @@ void MainWindow::buildActions()
             [this](bool on) { m_article->setUseDictionaryStyles(on); });
     viewMenu->addAction(m_dictionaryStylesAction);
 
+    m_menuBarAction = new QAction(QStringLiteral("Show &Menu Bar"), this);
+    m_menuBarAction->setCheckable(true);
+    m_menuBarAction->setChecked(true);
+    m_menuBarAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+M")));
+    connect(m_menuBarAction, &QAction::toggled, this, &MainWindow::setMenuBarVisible);
+    viewMenu->addAction(m_menuBarAction);
+
+    // Owned by the window as well, so Ctrl+M still reaches it once the menu
+    // bar it lives in is hidden.
+    addAction(m_menuBarAction);
+
     viewMenu->addSeparator();
     viewMenu->addAction(
         makeAction(QStringLiteral("&Dictionaries..."), &MainWindow::showDictionaryManager));
 
     auto *helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
     helpMenu->addAction(makeAction(QStringLiteral("&About qMdict"), &MainWindow::showAbout));
-
-    auto *toolBar = addToolBar(QStringLiteral("Main"));
-    toolBar->setMovable(false);
-    toolBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    toolBar->addAction(m_backAction);
-    toolBar->addAction(m_forwardAction);
-    toolBar->addSeparator();
-    toolBar->addAction(openAction);
 
     updateHistoryActions();
 
@@ -310,6 +313,10 @@ void MainWindow::restoreSettings()
                                   ArticleView::kDefaultFontPointSize)
                            .toDouble());
 
+    const bool menuBarVisible = settings.value(QStringLiteral("ui/menuBar"), true).toBool();
+    m_menuBarAction->setChecked(menuBarVisible);
+    menuBar()->setVisible(menuBarVisible);
+
     if (settings.contains(QStringLiteral("ui/geometry")))
         restoreGeometry(settings.value(QStringLiteral("ui/geometry")).toByteArray());
     if (settings.contains(QStringLiteral("ui/splitter")))
@@ -333,6 +340,7 @@ void MainWindow::saveSettings()
     settings.setValue(QStringLiteral("ui/theme"), theme::toString(m_themeMode));
     settings.setValue(QStringLiteral("ui/dictionaryStyles"), m_dictionaryStylesAction->isChecked());
     settings.setValue(QStringLiteral("ui/fontPointSize"), m_article->fontPointSize());
+    settings.setValue(QStringLiteral("ui/menuBar"), m_menuBarAction->isChecked());
     settings.setValue(QStringLiteral("ui/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("ui/splitter"), m_splitter->saveState());
 }
@@ -509,6 +517,13 @@ void MainWindow::resetFontSize()
 {
     applyFontPointSize(ArticleView::kDefaultFontPointSize);
     m_status->setText(QStringLiteral("Font size reset"));
+}
+
+void MainWindow::setMenuBarVisible(bool visible)
+{
+    menuBar()->setVisible(visible);
+    if (!visible)
+        m_status->setText(QStringLiteral("Menu bar hidden - press Ctrl+M to bring it back"));
 }
 
 void MainWindow::updateHistoryActions()

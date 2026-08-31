@@ -9,6 +9,7 @@
 #include "../src/mdict/library.h"
 #include "../src/mdict/mdictfile.h"
 #include "../src/ui/darkcolours.h"
+#include "../src/ui/htmlblocks.h"
 #include "../src/util/lzo1x.h"
 #include "../src/util/ripemd128.h"
 
@@ -116,6 +117,7 @@ struct FixtureOptions
     int keysPerBlock = 2;
     int recordBlockSplit = -1; // byte offset to force a record across two blocks
     int recordChunkSize = -1;  // fixed record block size, as real writers use
+    QString title = QStringLiteral("Fixture");
 };
 
 // Assembles a complete MDX/MDD container from `entries`, which must already be
@@ -133,8 +135,8 @@ QByteArray buildFixture(const std::vector<FixtureEntry> &entries, const FixtureO
     const QString headerXml =
         QStringLiteral("<Dictionary GeneratedByEngineVersion=\"%1\" RequiredEngineVersion=\"%1\" "
                        "Encrypted=\"No\" Encoding=\"%2\" Format=\"Html\" KeyCaseSensitive=\"No\" "
-                       "Title=\"Fixture\" Description=\"test\"/>")
-            .arg(QString::number(options.version, 'f', 1), encoding);
+                       "Title=\"%3\" Description=\"test\"/>")
+            .arg(QString::number(options.version, 'f', 1), encoding, options.title);
 
     QByteArray headerBytes;
     for (QChar c : headerXml) {
@@ -524,8 +526,90 @@ void testDictionaryLayer(const QString &dir)
                QByteArrayLiteral("fake-image-bytes"), "resource with a query string");
     check(dictionary.resource(QStringLiteral("missing.png")).isEmpty(), "missing resource");
 
-    checkEqual(dictionary.embeddedStyleSheet().toUtf8(), QByteArrayLiteral(".hw { color: green; }"),
-               "css is pulled out of the .mdd");
+    // An article that links its stylesheet by name resolves it from the .mdd.
+    checkEqual(dictionary
+                   .styleSheetFor(QStringLiteral("<link rel=\"stylesheet\" href=\"fruit.css\">"
+                                                 "<p>hi</p>"))
+                   .toUtf8()
+                   .trimmed(),
+               QByteArrayLiteral(".hw { color: green; }"), "linked css comes out of the .mdd");
+
+    // An article with no link at all still gets the dictionary's stylesheet.
+    checkEqual(dictionary.styleSheetFor(QStringLiteral("<p>hi</p>")).toUtf8().trimmed(),
+               QByteArrayLiteral(".hw { color: green; }"), "css falls back when nothing is linked");
+}
+
+// The failure this reproduces: a dictionary that ships its stylesheet as a
+// loose file beside the .mdx instead of inside the .mdd. Without it every
+// entry renders as one unbroken paragraph.
+void testLooseStyleSheet(const QString &dir)
+{
+    const QString folder = QDir(dir).filePath(QStringLiteral("loose"));
+    QDir().mkpath(folder);
+
+    const QString base = QDir(folder).filePath(QStringLiteral("O2"));
+    check(writeFixture(base + QStringLiteral(".mdx"), buildFixture(sampleEntries(), FixtureOptions())),
+          "loose-css fixture written");
+
+    const QByteArray css = "span.def { display: block; }\nspan.x { display: block; }\n";
+    QFile sheet(base + QStringLiteral(".css"));
+    check(sheet.open(QIODevice::WriteOnly), "loose css written");
+    sheet.write(css);
+    sheet.close();
+
+    qmdict::Dictionary dictionary;
+    QString error;
+    check(dictionary.load(base + QStringLiteral(".mdx"), QString(), &error), "loose-css dict loads");
+
+    const QString linked = dictionary.styleSheetFor(
+        QStringLiteral("<link rel=\"stylesheet\" type=\"text/css\" href=\"O2.css\"><span "
+                       "class=\"def\">a</span><span class=\"def\">b</span>"));
+    checkEqual(linked.toUtf8().trimmed(), css.trimmed(), "css beside the .mdx is found by href");
+
+    // Even when the article forgets the link, or names a file that is absent.
+    check(dictionary.styleSheetFor(QStringLiteral("<p>no link here</p>")).contains(
+              QLatin1String("display: block")),
+          "css beside the .mdx is found without a link");
+    check(dictionary.styleSheetFor(QStringLiteral("<link href=\"missing.css\">")).contains(
+              QLatin1String("display: block")),
+          "a missing stylesheet falls back rather than yielding nothing");
+
+    // An href must not be able to escape the dictionary's own folder.
+    QFile outside(QDir(dir).filePath(QStringLiteral("outside.css")));
+    outside.open(QIODevice::WriteOnly);
+    outside.write("body { color: red; }");
+    outside.close();
+    check(!dictionary.styleSheetFor(QStringLiteral("<link href=\"../outside.css\">"))
+               .contains(QLatin1String("color: red")),
+          "a stylesheet href cannot escape the dictionary folder");
+}
+
+// MdxBuilder leaves its field labels in the header when the author never
+// filled them in, which showed up in the UI as "Title (No HTML code allowed)".
+void testPlaceholderTitle(const QString &dir)
+{
+    FixtureOptions options;
+    options.title = QStringLiteral("Title (No HTML code allowed)");
+
+    const QString path = QDir(dir).filePath(QStringLiteral("Collins.mdx"));
+    check(writeFixture(path, buildFixture(sampleEntries(), options)), "placeholder-title fixture");
+
+    qmdict::MdictFile file;
+    QString error;
+    check(file.open(path, QString(), &error), "placeholder-title fixture opens");
+    checkEqual(file.title().toUtf8(), QByteArrayLiteral("Collins"),
+               "a placeholder title falls back to the file name");
+
+    // A real title must still survive untouched.
+    FixtureOptions named;
+    named.title = QStringLiteral("Oxford Advanced Learner's");
+    const QString other = QDir(dir).filePath(QStringLiteral("O2.mdx"));
+    check(writeFixture(other, buildFixture(sampleEntries(), named)), "named fixture");
+
+    qmdict::MdictFile second;
+    check(second.open(other, QString(), &error), "named fixture opens");
+    checkEqual(second.title().toUtf8(), QByteArrayLiteral("Oxford Advanced Learner's"),
+               "a real title is kept");
 }
 
 void testLibraryScan(const QString &dir)
@@ -795,6 +879,88 @@ void testSpeexDecoding()
           "decoded tone is at roughly the encoded pitch");
 }
 
+// --- block layout for span-based dictionaries -----------------------------
+
+void testHtmlBlocks()
+{
+    using namespace qmdict::htmlblocks;
+
+    // What the stylesheet declares block-level.
+    check(rulesFromStyleSheet(QStringLiteral(".def { display: block; }")).classes.contains("def"),
+          "a class rule is picked up");
+    check(rulesFromStyleSheet(QStringLiteral("span.def{display:block}")).classes.contains("def"),
+          "a tag-qualified class rule is picked up");
+    check(rulesFromStyleSheet(QStringLiteral(".a, .b { display: block }")).classes.contains("b"),
+          "grouped selectors are picked up");
+
+    // Only the rightmost compound is the rule's target.
+    const BlockRules descendant = rulesFromStyleSheet(QStringLiteral(".entry .def{display:block}"));
+    check(descendant.classes.contains("def") && !descendant.classes.contains("entry"),
+          "a descendant selector targets only its rightmost class");
+
+    check(rulesFromStyleSheet(QStringLiteral(".c { display: inline }")).isEmpty(),
+          "inline elements are left alone");
+    check(rulesFromStyleSheet(QStringLiteral(".c { display: inline-block }")).isEmpty(),
+          "inline-block does not force a line break");
+    check(rulesFromStyleSheet(QStringLiteral(".c { color: red }")).isEmpty(),
+          "rules without display are ignored");
+    check(rulesFromStyleSheet(QStringLiteral("span { display: block }")).everySpan,
+          "a bare span rule promotes every span");
+    check(rulesFromStyleSheet(QStringLiteral(".li { display: list-item }")).classes.contains("li"),
+          "list-item counts as block-forming");
+    check(!rulesFromStyleSheet(QStringLiteral("@media print { .x { display: block } }")).isEmpty(),
+          "at-rules do not break parsing");
+
+    // Rewriting.
+    BlockRules rules;
+    rules.classes = {QStringLiteral("def")};
+
+    checkEqual(promoteSpans(QStringLiteral("<span class=\"def\">a</span>"), rules).toUtf8(),
+               QByteArrayLiteral("<div class=\"def\">a</div>"), "a matching span becomes a div");
+    checkEqual(promoteSpans(QStringLiteral("<span class=\"other\">a</span>"), rules).toUtf8(),
+               QByteArrayLiteral("<span class=\"other\">a</span>"),
+               "a non-matching span is untouched");
+    checkEqual(promoteSpans(QStringLiteral("<span class='def'>a</span>"), rules).toUtf8(),
+               QByteArrayLiteral("<div class='def'>a</div>"), "single-quoted class attributes work");
+    checkEqual(promoteSpans(QStringLiteral("<span class=def>a</span>"), rules).toUtf8(),
+               QByteArrayLiteral("<div class=def>a</div>"), "unquoted class attributes work");
+    checkEqual(promoteSpans(QStringLiteral("<span class=\"hw def\">a</span>"), rules).toUtf8(),
+               QByteArrayLiteral("<div class=\"hw def\">a</div>"),
+               "one matching class among several is enough");
+
+    // Nesting must keep the tags balanced.
+    checkEqual(promoteSpans(
+                   QStringLiteral("<span class=\"def\">a<span class=\"hw\">b</span>c</span>"),
+                   rules)
+                   .toUtf8(),
+               QByteArrayLiteral("<div class=\"def\">a<span class=\"hw\">b</span>c</div>"),
+               "an inner non-matching span stays a span");
+
+    rules.classes.insert(QStringLiteral("hw"));
+    checkEqual(promoteSpans(
+                   QStringLiteral("<span class=\"hw\">a<span class=\"def\">b</span></span>"),
+                   rules)
+                   .toUtf8(),
+               QByteArrayLiteral("<div class=\"hw\">a<div class=\"def\">b</div></div>"),
+               "nested matching spans are both promoted");
+
+    // Robustness against the malformed markup dictionaries actually contain.
+    checkEqual(promoteSpans(QStringLiteral("plain text</span>more"), rules).toUtf8(),
+               QByteArrayLiteral("plain text</span>more"), "a stray close tag is left alone");
+    checkEqual(promoteSpans(QStringLiteral("a < b and c > d"), rules).toUtf8(),
+               QByteArrayLiteral("a < b and c > d"), "unescaped angle brackets survive");
+    checkEqual(promoteSpans(QStringLiteral("<span class=\"def\">unclosed"), rules).toUtf8(),
+               QByteArrayLiteral("<div class=\"def\">unclosed"), "an unclosed span still opens");
+    checkEqual(promoteSpans(QStringLiteral("<spanish>x</spanish>"), rules).toUtf8(),
+               QByteArrayLiteral("<spanish>x</spanish>"),
+               "tags merely starting with 'span' are not touched");
+
+    BlockRules none;
+    checkEqual(promoteSpans(QStringLiteral("<span class=\"def\">a</span>"), none).toUtf8(),
+               QByteArrayLiteral("<span class=\"def\">a</span>"),
+               "no rules means no rewriting");
+}
+
 // --- dark mode colours ----------------------------------------------------
 
 void testDarkColours()
@@ -877,11 +1043,14 @@ int main(int argc, char *argv[])
     testUnsortedKeys(fixtureDir);
     testResourceArchive(fixtureDir);
     testDictionaryLayer(fixtureDir);
+    testLooseStyleSheet(fixtureDir);
+    testPlaceholderTitle(fixtureDir);
     testLibraryScan(fixtureDir);
 
     testOggDemuxer();
     testWavPassthroughAndDetection();
     testSpeexDecoding();
+    testHtmlBlocks();
     testDarkColours();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

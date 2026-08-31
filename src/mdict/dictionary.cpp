@@ -1,8 +1,10 @@
 #include "dictionary.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QSet>
 
 namespace qmdict {
 namespace {
@@ -211,28 +213,105 @@ QByteArray Dictionary::resource(const QString &name)
     return QByteArray();
 }
 
-QString Dictionary::embeddedStyleSheet()
+QString Dictionary::loadStyleSheet(const QString &name)
 {
-    if (m_cssProbed)
-        return m_css;
-    m_cssProbed = true;
+    const auto cached = m_styleSheets.constFind(name);
+    if (cached != m_styleSheets.constEnd())
+        return cached.value();
+
+    // Only the file name is used, so a dictionary cannot reach outside its own
+    // folder with an href like "../../secrets.css".
+    const QString fileName = QFileInfo(normaliseResourceName(name)).fileName();
+    QString css;
+
+    const QByteArray packaged = resource(fileName);
+    if (!packaged.isEmpty()) {
+        css = QString::fromUtf8(packaged);
+    } else if (m_mdx) {
+        // Plenty of dictionaries ship the stylesheet loose beside the .mdx
+        // rather than packing it into the .mdd.
+        const QDir dir = QFileInfo(m_mdx->path()).absoluteDir();
+        QFile file(dir.filePath(fileName));
+        if (file.exists() && file.open(QIODevice::ReadOnly))
+            css = QString::fromUtf8(file.readAll());
+    }
+
+    m_styleSheets.insert(name, css);
+    return css;
+}
+
+QString Dictionary::fallbackStyleSheet()
+{
+    if (m_fallbackProbed)
+        return m_fallback;
+    m_fallbackProbed = true;
+
+    if (m_mdx) {
+        // A .css sitting next to the dictionary, preferring one that shares
+        // its base name.
+        const QFileInfo info(m_mdx->path());
+        const QDir dir = info.absoluteDir();
+        QStringList candidates = dir.entryList({QStringLiteral("*.css")}, QDir::Files, QDir::Name);
+
+        const QString preferred = info.completeBaseName() + QLatin1String(".css");
+        candidates.removeAll(preferred);
+        candidates.prepend(preferred);
+
+        for (const QString &candidate : candidates) {
+            QFile file(dir.filePath(candidate));
+            if (file.exists() && file.open(QIODevice::ReadOnly)) {
+                m_fallback = QString::fromUtf8(file.readAll());
+                if (!m_fallback.isEmpty())
+                    return m_fallback;
+            }
+        }
+    }
 
     for (const auto &mdd : m_mdd) {
         const int count = mdd->entryCount();
         for (int position = 0; position < count; ++position) {
             const int index = mdd->entryAtSortedPosition(position);
-            const QByteArray key = mdd->keyAt(index);
-            if (!key.endsWith(".css") && !key.endsWith(".CSS"))
+            if (!QString::fromUtf8(mdd->keyAt(index))
+                     .endsWith(QLatin1String(".css"), Qt::CaseInsensitive))
                 continue;
             const QByteArray data = mdd->recordAt(index);
             if (!data.isEmpty()) {
-                m_css = QString::fromUtf8(data);
-                return m_css;
+                m_fallback = QString::fromUtf8(data);
+                return m_fallback;
             }
         }
     }
 
-    return m_css;
+    return m_fallback;
+}
+
+QString Dictionary::styleSheetFor(const QString &articleHtml)
+{
+    static const QRegularExpression linkTag(
+        QStringLiteral("<link\\b[^>]*\\bhref\\s*=\\s*[\"']?([^\"'>\\s]+)"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    QString css;
+    QSet<QString> seen;
+
+    auto it = linkTag.globalMatch(articleHtml);
+    while (it.hasNext()) {
+        const QString href = it.next().captured(1);
+        if (!href.endsWith(QLatin1String(".css"), Qt::CaseInsensitive) || seen.contains(href))
+            continue;
+        seen.insert(href);
+
+        const QString resolved = loadStyleSheet(href);
+        if (!resolved.isEmpty())
+            css += resolved + QLatin1Char('\n');
+    }
+
+    // Articles that reference no stylesheet, or whose stylesheet is missing,
+    // still usually have one shipped with the dictionary.
+    if (css.isEmpty())
+        return fallbackStyleSheet();
+
+    return css;
 }
 
 } // namespace qmdict

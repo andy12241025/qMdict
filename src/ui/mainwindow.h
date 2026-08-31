@@ -48,6 +48,7 @@ private slots:
     void openExternal(const QUrl &url);
     void changeFontSize(qreal delta);
     void resetFontSize();
+    void setMenuBarVisible(bool visible);
 
 private:
     void buildUi();
@@ -81,6 +82,7 @@ private:
     QAction *m_backAction = nullptr;
     QAction *m_forwardAction = nullptr;
     QAction *m_dictionaryStylesAction = nullptr;
+    QAction *m_menuBarAction = nullptr;
     QVector<QAction *> m_themeActions;
 
     QStringList m_history;

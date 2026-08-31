@@ -6,6 +6,9 @@
 // out of the .mdd archives through loadResource().
 #pragma once
 
+#include "htmlblocks.h"
+
+#include <QHash>
 #include <QTextBrowser>
 #include <QVector>
 
@@ -55,10 +58,15 @@ private:
     QString collectStyles() const;
     static QString sanitise(const QString &html);
 
+    // Parsing a dictionary's stylesheet is not free, and it never changes
+    // while the dictionary is open.
+    const htmlblocks::BlockRules &blockRulesFor(Dictionary *dictionary, const QString &articleHtml);
+
     QString m_word;
     QVector<QPair<Dictionary *, QString>> m_articles;
     bool m_useDictionaryStyles = true;
     qreal m_fontPointSize = kDefaultFontPointSize;
+    QHash<Dictionary *, htmlblocks::BlockRules> m_blockRules;
 };
 
 } // namespace qmdict
