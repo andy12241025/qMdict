@@ -20,6 +20,7 @@ few tens of megabytes of RAM rather than a gigabyte.
   setting is remembered. Double-clicking any word in an article looks it up.
 - **Stays out of the way.** Closing the window hides it to the system tray so the index stays
   warm and the next lookup is instant; turn that off under **File → Close to System Tray**.
+  Emptying the search box brings back your recent lookups, remembered between sessions.
 - **Low memory and fast startup.** Only the headword index lives in RAM; articles are inflated
   on demand into a small LRU cache. The index is cached on disk after the first open, so
   subsequent launches are effectively instant.
@@ -45,6 +46,7 @@ inside the unpacked directory and nowhere else; delete the folder and no trace r
 | Action | How |
 | --- | --- |
 | Search | Type in the box; results update as you type |
+| See what you looked up before | Clear the search box; the list shows recent lookups |
 | Move through results | Up/Down arrows work while the cursor stays in the search box |
 | Look up a word you are reading | Double-click it in an article |
 | Follow a cross-reference | Click any link in an article |

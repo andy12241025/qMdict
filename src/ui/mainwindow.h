@@ -40,6 +40,7 @@ private slots:
     void chooseFolder();
     void reloadLibrary();
     void updateSuggestions();
+    void clearHistory();
     void showCurrentSelection();
     void navigateTo(const QString &word);
     void goBack();
@@ -60,6 +61,10 @@ private:
     // Points the search box and result list at `word` without triggering a
     // second navigation from the list selection.
     void syncSearchTo(const QString &word);
+
+    // Records a word the reader deliberately opened. Arrow-key browsing
+    // through results does not count, or typing would flood the list.
+    void rememberLookup(const QString &word);
 
     // Applies `points` to the article and scales the result list to match.
     void applyFontPointSize(qreal points);
@@ -96,6 +101,8 @@ private:
     bool m_trayHintShown = false;
 
     QStringList m_history;
+    QStringList m_recent;   // lookup history, most recent first
+    bool m_showingHistory = true;
     int m_historyPosition = -1;
     bool m_navigating = false;
     bool m_suppressSelectionNavigation = false;

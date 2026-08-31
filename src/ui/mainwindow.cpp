@@ -36,6 +36,7 @@ namespace qmdict {
 namespace {
 
 constexpr int kSuggestionLimit = 400;
+constexpr int kHistoryLimit = 200;
 constexpr int kSearchDelayMs = 120;
 
 // Qt treats a sequence listed twice on one action as ambiguous and then
@@ -157,12 +158,27 @@ void MainWindow::buildUi()
     connect(m_search, &QLineEdit::textChanged, this, [this]() { m_searchTimer->start(); });
     connect(m_search, &QLineEdit::returnPressed, this, [this]() {
         const QString word = m_search->text().trimmed();
-        if (!word.isEmpty())
+        if (!word.isEmpty()) {
+            rememberLookup(word);
             navigateTo(word);
+        }
     });
+
+    // Moving through results with the arrow keys previews them; only a
+    // deliberate choice is worth remembering.
     connect(m_wordList->selectionModel(), &QItemSelectionModel::currentChanged, this,
             &MainWindow::showCurrentSelection);
+    const auto chooseFromList = [this](const QModelIndex &index) {
+        if (!index.isValid())
+            return;
+        const QString word = index.data(Qt::DisplayRole).toString();
+        rememberLookup(word);
+        navigateTo(word);
+    };
+    connect(m_wordList, &QListView::clicked, this, chooseFromList);
+    connect(m_wordList, &QListView::activated, this, chooseFromList);
     connect(m_article, &ArticleView::wordActivated, this, [this](const QString &word) {
+        rememberLookup(word);
         syncSearchTo(word);
         navigateTo(word);
     });
@@ -174,6 +190,7 @@ void MainWindow::buildUi()
             m_status->setText(QStringLiteral("\"%1\" is not in any dictionary").arg(word));
             return;
         }
+        rememberLookup(word);
         syncSearchTo(word);
         navigateTo(word);
     });
@@ -225,6 +242,8 @@ void MainWindow::buildActions()
     goMenu->addAction(m_forwardAction);
     goMenu->addSeparator();
     goMenu->addAction(focusAction);
+    goMenu->addSeparator();
+    goMenu->addAction(makeAction(QStringLiteral("Clear &History"), &MainWindow::clearHistory));
 
     m_article->setNavigationActions(m_backAction, m_forwardAction);
 
@@ -356,6 +375,10 @@ void MainWindow::restoreSettings()
     m_closeToTrayAction->setChecked(
         settings.value(QStringLiteral("ui/closeToTray"), true).toBool());
 
+    m_recent = settings.value(QStringLiteral("library/history")).toStringList();
+    while (m_recent.size() > kHistoryLimit)
+        m_recent.removeLast();
+
     if (settings.contains(QStringLiteral("ui/geometry")))
         restoreGeometry(settings.value(QStringLiteral("ui/geometry")).toByteArray());
     if (settings.contains(QStringLiteral("ui/splitter")))
@@ -381,6 +404,7 @@ void MainWindow::saveSettings()
     settings.setValue(QStringLiteral("ui/fontPointSize"), m_article->fontPointSize());
     settings.setValue(QStringLiteral("ui/menuBar"), m_menuBarAction->isChecked());
     settings.setValue(QStringLiteral("ui/closeToTray"), m_closeToTrayAction->isChecked());
+    settings.setValue(QStringLiteral("library/history"), m_recent);
     settings.setValue(QStringLiteral("ui/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("ui/splitter"), m_splitter->saveState());
 }
@@ -503,14 +527,51 @@ void MainWindow::reloadLibrary()
 void MainWindow::updateSuggestions()
 {
     const QString prefix = m_search->text().trimmed();
+
     if (prefix.isEmpty()) {
-        m_wordModel->setStringList({});
+        // An empty box is the natural place for what you looked up before.
+        m_wordModel->setStringList(m_recent);
+        m_showingHistory = true;
+
+        // Deliberately no auto-selection here: picking the top entry would
+        // navigate away the moment the box is cleared.
+        m_wordList->clearSelection();
+        m_wordList->setCurrentIndex(QModelIndex());
         return;
     }
 
+    m_showingHistory = false;
     m_wordModel->setStringList(m_library.suggestions(prefix, kSuggestionLimit));
     if (m_wordModel->rowCount() > 0)
         m_wordList->setCurrentIndex(m_wordModel->index(0, 0));
+}
+
+void MainWindow::rememberLookup(const QString &word)
+{
+    const QString trimmed = word.trimmed();
+    if (trimmed.isEmpty())
+        return;
+
+    // Case-insensitively de-duplicated, most recent first.
+    for (int i = m_recent.size() - 1; i >= 0; --i) {
+        if (m_recent.at(i).compare(trimmed, Qt::CaseInsensitive) == 0)
+            m_recent.removeAt(i);
+    }
+
+    m_recent.prepend(trimmed);
+    while (m_recent.size() > kHistoryLimit)
+        m_recent.removeLast();
+
+    if (m_showingHistory)
+        m_wordModel->setStringList(m_recent);
+}
+
+void MainWindow::clearHistory()
+{
+    m_recent.clear();
+    if (m_showingHistory)
+        m_wordModel->setStringList(m_recent);
+    m_status->setText(QStringLiteral("History cleared"));
 }
 
 void MainWindow::showCurrentSelection()
