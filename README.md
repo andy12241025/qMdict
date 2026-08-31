@@ -181,6 +181,11 @@ name, so turning `<top-g>` into `<div>` would fix the line breaks and lose every
 the entry had. Tag names carrying an XML namespace, such as `<xhtml:br>` and `<xhtml:a>`, are
 also un-prefixed, since Qt would otherwise drop the line break or the link on the floor.
 
+Rules scoped to an ancestor are applied only within it. Oxford relies on that in both
+directions: `def chn` keeps a definition's translation inline while `x-g-blk x chn` gives an
+example's translation its own line, and `top-g xhtml\:br` suppresses the break between the two
+pronunciations so they share a line without affecting breaks anywhere else.
+
 `display: none` and `visibility: hidden` are honoured the same way, by removing the element.
 Dictionaries use both for markup that is not meant to be read. Oxford hides its `BrE` and `NAmE`
 labels and tints the pronunciations blue and brown instead, and blanks the literal 🔑 in front of

@@ -61,13 +61,48 @@ bool isBlockDisplay(const QString &value)
            v == QLatin1String("grid");
 }
 
-// The rule applies to the rightmost compound of the selector: in
-// "pron-g-blk brelabel" the target is brelabel.
-void collectTargets(const QString &selector, QSet<QString> *classes, QSet<QString> *elements)
+// Parses one compound such as "unbox", ".big_pic" or "xhtml\:br".
+// Returns false when the compound is a pseudo-element, which styles generated
+// content rather than the element itself.
+bool parseCompound(const QString &text, Selector *selector)
 {
-    static const QRegularExpression classToken(QStringLiteral("\\.([_a-zA-Z][-_a-zA-Z0-9]*)"));
-    static const QRegularExpression elementToken(QStringLiteral("^([a-zA-Z][-_a-zA-Z0-9]*)"));
+    // An escaped colon is part of a namespaced element name, not a pseudo, so
+    // it is set aside before looking for one.
+    static const QString marker = QStringLiteral("\x01");
+    QString compound = text;
+    compound.replace(QLatin1String("\\:"), marker);
 
+    if (compound.contains(QLatin1Char(':')))
+        return false;
+
+    const int bracket = compound.indexOf(QLatin1Char('['));
+    if (bracket >= 0)
+        compound.truncate(bracket);
+    compound.replace(marker, QLatin1String(":"));
+
+    static const QRegularExpression classToken(QStringLiteral("\\.([_a-zA-Z][-_a-zA-Z0-9]*)"));
+    const QRegularExpressionMatch klass = classToken.match(compound);
+    if (klass.hasMatch())
+        selector->klass = klass.captured(1);
+
+    static const QRegularExpression elementToken(
+        QStringLiteral("^([a-zA-Z][-_a-zA-Z0-9]*(?::[a-zA-Z][-_a-zA-Z0-9]*)?)"));
+    const QRegularExpressionMatch element = elementToken.match(compound);
+    if (element.hasMatch()) {
+        QString name = element.captured(1).toLower();
+        const int colon = name.lastIndexOf(QLatin1Char(':'));
+        if (colon >= 0)
+            name = name.mid(colon + 1); // xhtml:br is just br to Qt
+        selector->element = name;
+    }
+
+    return !selector->isEmpty();
+}
+
+// Collects the rules a selector list contributes, keeping the ancestor when
+// the stylesheet scoped the rule to one.
+void collectRules(const QString &selector, bool forBlocks, QList<Rule> *rules)
+{
     for (const QString &alternative : selector.split(QLatin1Char(','))) {
         QString flattened = alternative.trimmed();
         flattened.replace(QLatin1Char('>'), QLatin1Char(' '));
@@ -78,40 +113,45 @@ void collectTargets(const QString &selector, QSet<QString> *classes, QSet<QStrin
         if (parts.isEmpty())
             continue;
 
-        QString compound = parts.last();
-
-        // ::before and :after style generated content, not the element box.
-        // An escaped colon, as in "xhtml\:br", is not a pseudo-element, but
-        // treating it as one simply leaves the element alone, which is safe.
-        if (compound.contains(QLatin1Char(':')))
+        Rule rule;
+        if (!parseCompound(parts.last(), &rule.target))
             continue;
 
-        const int bracket = compound.indexOf(QLatin1Char('['));
-        if (bracket >= 0)
-            compound.truncate(bracket);
+        // Wrapping an element Qt already lays out gains nothing, and forcing a
+        // wrapper around an <img> or a <td> would change what the markup means.
+        if (forBlocks && rule.target.klass.isEmpty() &&
+            standardElements().contains(rule.target.element))
+            continue;
 
-        auto tokens = classToken.globalMatch(compound);
-        while (tokens.hasNext())
-            classes->insert(tokens.next().captured(1));
-
-        const QRegularExpressionMatch element = elementToken.match(compound);
-        if (element.hasMatch()) {
-            const QString name = element.captured(1).toLower();
-            if (!standardElements().contains(name))
-                elements->insert(name);
+        if (parts.size() >= 2) {
+            Selector ancestor;
+            if (parseCompound(parts.at(parts.size() - 2), &ancestor))
+                rule.ancestor = ancestor;
         }
+
+        rules->append(rule);
     }
 }
 
 struct OpenElement
 {
     QString name;
+    QStringList classes;
     bool wrapped = false;
     bool hidden = false;
     bool unwrapped = false;
 };
 
 } // namespace
+
+bool Selector::matches(const QString &name, const QStringList &classes) const
+{
+    if (!element.isEmpty() && element != name)
+        return false;
+    if (!klass.isEmpty() && !classes.contains(klass))
+        return false;
+    return !isEmpty();
+}
 
 bool isNavigableHref(const QString &href)
 {
@@ -173,7 +213,7 @@ LayoutRules rulesFromStyleSheet(const QString &css)
         // the icon nor nothing, so the raw emoji leaks onto the page.
         if (visible.hasMatch() &&
             visible.captured(1).trimmed().compare(QLatin1String("hidden"), Qt::CaseInsensitive) == 0) {
-            collectTargets(selector, &rules.hiddenClasses, &rules.hiddenElements);
+            collectRules(selector, false, &rules.hidden);
             continue;
         }
 
@@ -182,9 +222,9 @@ LayoutRules rulesFromStyleSheet(const QString &css)
 
         const QString value = shown.captured(1).trimmed().toLower();
         if (isBlockDisplay(value))
-            collectTargets(selector, &rules.blockClasses, &rules.blockElements);
+            collectRules(selector, true, &rules.blocks);
         else if (value == QLatin1String("none"))
-            collectTargets(selector, &rules.hiddenClasses, &rules.hiddenElements);
+            collectRules(selector, false, &rules.hidden);
     }
 
     return rules;
@@ -314,22 +354,30 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
         if (classMatch.hasMatch())
             classes = attributeValue(classMatch).split(QLatin1Char(' '), Qt::SkipEmptyParts);
 
-        auto mentions = [&classes](const QSet<QString> &set) {
-            for (const QString &candidate : classes) {
-                if (set.contains(candidate))
+        // A scoped rule only applies inside its ancestor, which is what keeps
+        // "top-g xhtml:br" from deleting every line break in the entry.
+        auto applies = [&](const QList<Rule> &candidates) {
+            for (const Rule &rule : candidates) {
+                if (!rule.target.matches(key, classes))
+                    continue;
+                if (rule.ancestor.isEmpty())
                     return true;
+                for (const OpenElement &enclosing : open) {
+                    if (rule.ancestor.matches(enclosing.name, enclosing.classes))
+                        return true;
+                }
             }
             return false;
         };
 
-        const bool hidden = rules.hiddenElements.contains(key) || mentions(rules.hiddenClasses);
+        const bool hidden = applies(rules.hidden);
         const bool selfClosing = tag.endsWith(QLatin1String("/>"));
 
         if (hidden) {
             // Void elements have no content to skip and no close tag to wait
             // for, so they simply vanish.
             if (!isVoidElement(key) && !selfClosing) {
-                open.append({key, false, true, false});
+                open.append({key, classes, false, true, false});
                 ++suppressed;
             }
             continue;
@@ -337,7 +385,7 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
 
         if (suppressed > 0) {
             if (!isVoidElement(key) && !selfClosing)
-                open.append({key, false, false, false});
+                open.append({key, classes, false, false, false});
             continue;
         }
 
@@ -348,8 +396,7 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
             unwrap = !href.hasMatch() || !isNavigableHref(attributeValue(href));
         }
 
-        const bool wrap =
-            rules.blockElements.contains(key) || mentions(rules.blockClasses);
+        const bool wrap = applies(rules.blocks);
 
         if (isVoidElement(key) || selfClosing) {
             out += tag;
@@ -360,7 +407,7 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
             out += QLatin1String("<div>");
         if (!unwrap)
             out += tag;
-        open.append({key, wrap, false, unwrap});
+        open.append({key, classes, wrap, false, unwrap});
     }
 
     // Balance anything the dictionary never closed.

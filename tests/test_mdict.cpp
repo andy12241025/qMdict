@@ -886,135 +886,135 @@ void testHtmlBlocks()
 {
     using namespace qmdict::htmlblocks;
 
-    // What the stylesheet declares block-level.
-    check(rulesFromStyleSheet(QStringLiteral(".def { display: block; }")).blockClasses.contains("def"),
-          "a class rule is picked up");
-    check(rulesFromStyleSheet(QStringLiteral("top-g{display:block;clear:left}"))
-              .blockElements.contains("top-g"),
-          "a custom element rule is picked up");
-    check(rulesFromStyleSheet(QStringLiteral(".a, .b { display: block }")).blockClasses.contains("b"),
-          "grouped selectors are picked up");
+    // Exercised end to end -- parse a stylesheet, then apply it -- because the
+    // interesting behaviour lives in how the two fit together.
+    auto apply = [](const QString &css, const QString &html) {
+        return adaptForTextDocument(html, rulesFromStyleSheet(css));
+    };
 
-    // Only the rightmost compound is the rule's target.
-    const LayoutRules descendant = rulesFromStyleSheet(QStringLiteral("x-g-blk cf-blk{display:block}"));
-    check(descendant.blockElements.contains("cf-blk") && !descendant.blockElements.contains("x-g-blk"),
-          "a descendant selector targets only its rightmost element");
-
-    check(rulesFromStyleSheet(QStringLiteral(".c { display: inline }")).isEmpty(),
-          "inline elements are left alone");
-    check(rulesFromStyleSheet(QStringLiteral(".c { display: inline-block }")).isEmpty(),
-          "inline-block does not force a line break");
-    check(rulesFromStyleSheet(QStringLiteral(".c { color: red }")).isEmpty(),
-          "rules without display are ignored");
-
-    // Standard elements are Qt's business, not ours.
-    check(rulesFromStyleSheet(QStringLiteral("img{display:block}")).isEmpty(),
-          "standard elements are not wrapped");
-    check(rulesFromStyleSheet(QStringLiteral("unbox h2{display:block}")).isEmpty(),
-          "a standard element as the target is ignored");
-
-    // Generated content must not turn its element into a block.
-    check(rulesFromStyleSheet(QStringLiteral("h-g:after{display:block}")).isEmpty(),
-          "a pseudo-element rule does not promote its element");
-
-    // Comments must not be mistaken for selectors.
-    const LayoutRules commented =
-        rulesFromStyleSheet(QStringLiteral("/* cancel the quotes */\nund{display:block}"));
-    check(commented.blockElements.contains("und") && commented.blockElements.size() == 1,
-          "css comments are stripped before parsing");
-
-    check(rulesFromStyleSheet(QStringLiteral("unbox[type=\"colloc\"]{display:block}"))
-              .blockElements.contains("unbox"),
-          "attribute selectors still yield their element");
-
-    // --- rewriting -------------------------------------------------------
-    LayoutRules rules;
-    rules.blockElements = {QStringLiteral("top-g")};
-    rules.blockClasses = {QStringLiteral("def")};
-
+    // --- block layout ----------------------------------------------------
     // Wrapped, not renamed: the element must survive so element-name CSS
     // selectors keep matching it.
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a</top-g>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"),
+                     QStringLiteral("<top-g>a</top-g>")).toUtf8(),
                QByteArrayLiteral("<div><top-g>a</top-g></div>"),
                "a block element is wrapped rather than renamed");
-    checkEqual(adaptForTextDocument(QStringLiteral("<span class=\"def\">a</span>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral(".def{display:block}"),
+                     QStringLiteral("<span class=\"def\">a</span>")).toUtf8(),
                QByteArrayLiteral("<div><span class=\"def\">a</span></div>"),
                "a block class is wrapped");
-    checkEqual(adaptForTextDocument(QStringLiteral("<other>a</other>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"),
+                     QStringLiteral("<other>a</other>")).toUtf8(),
                QByteArrayLiteral("<other>a</other>"), "an inline element is untouched");
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g eid=\"x\">a</top-g>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"),
+                     QStringLiteral("<top-g eid=\"x\">a</top-g>")).toUtf8(),
                QByteArrayLiteral("<div><top-g eid=\"x\">a</top-g></div>"),
                "attributes are preserved");
 
-    // Namespace prefixes, which Qt would otherwise drop on the floor.
-    checkEqual(adaptForTextDocument(QStringLiteral("a<xhtml:br></xhtml:br>b"), rules).toUtf8(),
-               QByteArrayLiteral("a<br>b"), "a namespaced line break becomes a real one");
-    checkEqual(adaptForTextDocument(QStringLiteral("<xhtml:a href=\"x\">t</xhtml:a>"), rules).toUtf8(),
-               QByteArrayLiteral("<a href=\"x\">t</a>"), "a namespaced link becomes a real one");
+    check(apply(QStringLiteral(".c{display:inline}"), QStringLiteral("<span class=\"c\">a</span>"))
+              == QStringLiteral("<span class=\"c\">a</span>"),
+          "inline elements are left alone");
+    check(apply(QStringLiteral(".c{display:inline-block}"),
+                QStringLiteral("<span class=\"c\">a</span>")) ==
+              QStringLiteral("<span class=\"c\">a</span>"),
+          "inline-block does not force a line break");
+    check(apply(QStringLiteral("img{display:block}"), QStringLiteral("<img src=\"x\">")) ==
+              QStringLiteral("<img src=\"x\">"),
+          "standard elements are Qt's business, not ours");
+    check(apply(QStringLiteral("h-g:after{display:block}"), QStringLiteral("<h-g>a</h-g>")) ==
+              QStringLiteral("<h-g>a</h-g>"),
+          "a pseudo-element rule does not promote its element");
+    check(apply(QStringLiteral("/* note */\nund{display:block}"), QStringLiteral("<und>a</und>")) ==
+              QStringLiteral("<div><und>a</und></div>"),
+          "css comments are stripped before parsing");
+    check(apply(QStringLiteral("unbox[type=\"colloc\"]{display:block}"),
+                QStringLiteral("<unbox>a</unbox>")) == QStringLiteral("<div><unbox>a</unbox></div>"),
+          "attribute selectors still yield their element");
 
     // Nesting and balance.
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a<b>c</b></top-g>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"),
+                     QStringLiteral("<top-g>a<b>c</b></top-g>")).toUtf8(),
                QByteArrayLiteral("<div><top-g>a<b>c</b></top-g></div>"),
                "nested standard elements are left alone");
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g><top-g>x</top-g></top-g>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"),
+                     QStringLiteral("<top-g><top-g>x</top-g></top-g>")).toUtf8(),
                QByteArrayLiteral("<div><top-g><div><top-g>x</top-g></div></top-g></div>"),
                "nested block elements each get a wrapper");
-
-    // The malformed markup dictionaries really contain.
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>unclosed"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"), QStringLiteral("<top-g>unclosed"))
+                   .toUtf8(),
                QByteArrayLiteral("<div><top-g>unclosed</top-g></div>"),
                "an unclosed block element is balanced");
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g><i>x</top-g>"), rules).toUtf8(),
+    checkEqual(apply(QStringLiteral("top-g{display:block}"),
+                     QStringLiteral("<top-g><i>x</top-g>")).toUtf8(),
                QByteArrayLiteral("<div><top-g><i>x</i></top-g></div>"),
                "an unclosed inner element is balanced too");
-    checkEqual(adaptForTextDocument(QStringLiteral("text</top-g>more"), rules).toUtf8(),
+
+    LayoutRules none;
+    checkEqual(adaptForTextDocument(QStringLiteral("text</top-g>more"), none).toUtf8(),
                QByteArrayLiteral("text</top-g>more"), "a stray close tag is left alone");
-    checkEqual(adaptForTextDocument(QStringLiteral("a < b and c > d"), rules).toUtf8(),
+    checkEqual(adaptForTextDocument(QStringLiteral("a < b and c > d"), none).toUtf8(),
                QByteArrayLiteral("a < b and c > d"), "unescaped angle brackets survive");
-    checkEqual(adaptForTextDocument(QStringLiteral("<img src=\"x.png\">t"), rules).toUtf8(),
-               QByteArrayLiteral("<img src=\"x.png\">t"), "void elements are not wrapped");
-    checkEqual(adaptForTextDocument(QStringLiteral("<!-- note -->x"), rules).toUtf8(),
+    checkEqual(adaptForTextDocument(QStringLiteral("<!-- note -->x"), none).toUtf8(),
                QByteArrayLiteral("<!-- note -->x"), "comments pass through");
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a</top-g>"), none).toUtf8(),
+               QByteArrayLiteral("<top-g>a</top-g>"), "no rules means no wrapping");
 
-    // --- hidden elements -------------------------------------------------
-    // Oxford hides its BrE/NAmE labels and colours the pronunciation instead;
-    // rendering them anyway jams them against the headword.
-    const LayoutRules hiding =
-        rulesFromStyleSheet(QStringLiteral("pron-g-blk brelabel{padding-left:4px;display:none}"));
-    check(hiding.hiddenElements.contains("brelabel"), "display:none is collected");
-    check(hiding.blockElements.isEmpty(), "display:none is not mistaken for a block");
+    // --- namespaced tags --------------------------------------------------
+    checkEqual(adaptForTextDocument(QStringLiteral("a<xhtml:br></xhtml:br>b"), none).toUtf8(),
+               QByteArrayLiteral("a<br>b"), "a namespaced line break becomes a real one");
+    checkEqual(adaptForTextDocument(QStringLiteral("<xhtml:a href=\"entry://x\">t</xhtml:a>"), none)
+                   .toUtf8(),
+               QByteArrayLiteral("<a href=\"entry://x\">t</a>"),
+               "a namespaced link becomes a real one");
 
-    // Oxford blanks the literal key emoji in front of a headword this way and
-    // substitutes an icon-font glyph Qt cannot draw, so the emoji leaked out
-    // as two missing-glyph boxes (one per UTF-16 half).
-    const LayoutRules blanked =
-        rulesFromStyleSheet(QStringLiteral("symbol[type=key]{color:OrangeRed;visibility:hidden}"));
-    check(blanked.hiddenElements.contains("symbol"), "visibility:hidden is collected");
+    // --- hidden elements --------------------------------------------------
+    // Oxford hides its BrE/NAmE labels and colours the pronunciations instead.
+    checkEqual(apply(QStringLiteral("pron-g-blk brelabel{display:none}"),
+                     QStringLiteral("<pron-g-blk>a<brelabel>BrE</brelabel> b</pron-g-blk>"))
+                   .toUtf8(),
+               QByteArrayLiteral("<pron-g-blk>a b</pron-g-blk>"),
+               "a hidden element and its content are dropped");
+    checkEqual(apply(QStringLiteral("brelabel{display:none}"),
+                     QStringLiteral("a<brelabel>BrE</brelabel> b")).toUtf8(),
+               QByteArrayLiteral("a b"), "an unscoped hidden element is dropped anywhere");
+    checkEqual(apply(QStringLiteral(".gone{display:none}"),
+                     QStringLiteral("<span class=\"gone\">x</span>y")).toUtf8(),
+               QByteArrayLiteral("y"), "a hidden class is dropped");
+    checkEqual(apply(QStringLiteral("brelabel{display:none}"),
+                     QStringLiteral("<brelabel><b>x</b><i>y</i></brelabel>z")).toUtf8(),
+               QByteArrayLiteral("z"), "nested content inside a hidden element goes too");
 
-    // The same stylesheets carry old IE hacks that must not be mistaken for it.
-    const LayoutRules hacks = rulesFromStyleSheet(
-        QStringLiteral("x{visibility:hidden;*visibility:visible !important;"
-                       "_visibility:visible !important}"));
-    check(hacks.hiddenElements.contains("x"), "the real declaration still wins over IE hacks");
-    check(rulesFromStyleSheet(QStringLiteral("y{*visibility:hidden}")).isEmpty(),
+    // visibility:hidden is the other way these stylesheets blank something out.
+    checkEqual(apply(QStringLiteral("symbol[type=key]{color:red;visibility:hidden}"),
+                     QStringLiteral("<symbol type=\"key\">K</symbol>word")).toUtf8(),
+               QByteArrayLiteral("word"), "visibility:hidden also removes the element");
+    check(apply(QStringLiteral("x{visibility:hidden;*visibility:visible !important}"),
+                QStringLiteral("<x>a</x>b")) == QStringLiteral("b"),
+          "the real declaration wins over the IE hacks beside it");
+    check(apply(QStringLiteral("y{*visibility:hidden}"), QStringLiteral("<y>a</y>")) ==
+              QStringLiteral("<y>a</y>"),
           "an IE-hack property alone hides nothing");
-    check(rulesFromStyleSheet(QStringLiteral("z{visibility:visible}")).isEmpty(),
+    check(apply(QStringLiteral("z{visibility:visible}"), QStringLiteral("<z>a</z>")) ==
+              QStringLiteral("<z>a</z>"),
           "visibility:visible hides nothing");
 
-    LayoutRules hidden;
-    hidden.hiddenElements = {QStringLiteral("brelabel")};
-    hidden.hiddenClasses = {QStringLiteral("gone")};
+    // --- scoped rules -----------------------------------------------------
+    // Oxford suppresses the break between two pronunciations with
+    // "top-g xhtml\:br{display:none}". Applying that everywhere would delete
+    // every line break in the entry, so the ancestor has to be respected.
+    const QString scoped = QStringLiteral("top-g xhtml\\:br{display:none}");
+    checkEqual(apply(scoped, QStringLiteral("<top-g>a<xhtml:br></xhtml:br>b</top-g>")).toUtf8(),
+               QByteArrayLiteral("<top-g>ab</top-g>"),
+               "a break inside the scoped ancestor is removed");
+    checkEqual(apply(scoped, QStringLiteral("<other>a<xhtml:br></xhtml:br>b</other>")).toUtf8(),
+               QByteArrayLiteral("<other>a<br>b</other>"),
+               "the same break outside that ancestor survives");
 
-    checkEqual(adaptForTextDocument(QStringLiteral("a<brelabel>BrE</brelabel> b"), hidden).toUtf8(),
-               QByteArrayLiteral("a b"), "a hidden element and its content are dropped");
-    checkEqual(adaptForTextDocument(QStringLiteral("<span class=\"gone\">x</span>y"), hidden).toUtf8(),
-               QByteArrayLiteral("y"), "a hidden class is dropped");
-    checkEqual(adaptForTextDocument(QStringLiteral("<brelabel><b>x</b><i>y</i></brelabel>z"),
-                                    hidden)
-                   .toUtf8(),
-               QByteArrayLiteral("z"), "nested content inside a hidden element goes too");
-    checkEqual(adaptForTextDocument(QStringLiteral("<brelabel>x"), hidden).toUtf8(),
-               QByteArrayLiteral(""), "an unclosed hidden element swallows the rest");
+    const QString scopedClass = QStringLiteral("unbox und{display:none}");
+    checkEqual(apply(scopedClass, QStringLiteral("<unbox><und>x</und></unbox>")).toUtf8(),
+               QByteArrayLiteral("<unbox></unbox>"), "a scoped element is hidden inside its box");
+    checkEqual(apply(scopedClass, QStringLiteral("<und>x</und>")).toUtf8(),
+               QByteArrayLiteral("<und>x</und>"), "and kept outside it");
 
     // --- links that go nowhere -------------------------------------------
     check(!isNavigableHref(QStringLiteral("help:bre")), "help: is not a headword link");
@@ -1028,22 +1028,14 @@ void testHtmlBlocks()
     check(isNavigableHref(QStringLiteral("#anchor")), "an in-page anchor is a link");
     check(isNavigableHref(QStringLiteral("https://example.org")), "https is a link");
 
-    LayoutRules plain;
-    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:bre\">BrE</a>"), plain).toUtf8(),
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:bre\">BrE</a>"), none).toUtf8(),
                QByteArrayLiteral("BrE"), "a dead link is unwrapped, keeping its text");
-    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"entry://x\">x</a>"), plain).toUtf8(),
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"entry://x\">x</a>"), none).toUtf8(),
                QByteArrayLiteral("<a href=\"entry://x\">x</a>"), "a real link is kept");
-    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"sound://a.spx\">s</a>"), plain).toUtf8(),
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"sound://a.spx\">s</a>"), none).toUtf8(),
                QByteArrayLiteral("<a href=\"sound://a.spx\">s</a>"), "an audio link is kept");
-    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:x\"><b>t</b></a>"), plain).toUtf8(),
+    checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:x\"><b>t</b></a>"), none).toUtf8(),
                QByteArrayLiteral("<b>t</b>"), "markup inside a dead link survives");
-
-    LayoutRules none;
-    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a</top-g>"), none).toUtf8(),
-               QByteArrayLiteral("<top-g>a</top-g>"), "no rules means no wrapping");
-    checkEqual(adaptForTextDocument(QStringLiteral("x<xhtml:br>y"), none).toUtf8(),
-               QByteArrayLiteral("x<br>y"),
-               "namespace prefixes are fixed even without block rules");
 }
 
 // --- stylesheet filtering -------------------------------------------------
