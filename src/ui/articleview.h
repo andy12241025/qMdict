@@ -6,6 +6,7 @@
 // out of the .mdd archives through loadResource().
 #pragma once
 
+#include "cssfilter.h"
 #include "htmlblocks.h"
 
 #include <QHash>
@@ -55,8 +56,12 @@ protected:
 
 private:
     void rebuild();
-    QString collectStyles() const;
+    QString collectStyles();
     static QString sanitise(const QString &html);
+
+    // Filtering 24 KB of stylesheet is not free, and the result never changes
+    // while the dictionary is open.
+    const QString &usableStyleSheetFor(Dictionary *dictionary, const QString &articleHtml);
 
     // Parsing a dictionary's stylesheet is not free, and it never changes
     // while the dictionary is open.
@@ -67,6 +72,7 @@ private:
     bool m_useDictionaryStyles = true;
     qreal m_fontPointSize = kDefaultFontPointSize;
     QHash<Dictionary *, htmlblocks::BlockRules> m_blockRules;
+    QHash<Dictionary *, QString> m_usableStyles;
 };
 
 } // namespace qmdict

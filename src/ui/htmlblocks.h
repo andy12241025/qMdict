@@ -1,18 +1,23 @@
-// Works around a hard limit of Qt's rich text engine.
+// Makes dictionary markup renderable by Qt's rich text engine.
 //
-// QTextDocument decides block versus inline layout from the element name
-// alone. A `display: block` on a <span> is ignored no matter how it is
-// delivered -- default stylesheet, inline style attribute or an embedded
-// <style> block. Dictionaries such as Oxford build an entire entry out of
-// styled <span>s, so under QTextBrowser they collapse into one unbroken
-// paragraph.
+// Two habits of real dictionaries defeat QTextDocument:
 //
-// The fix is to read the dictionary's own stylesheet, work out which classes
-// it makes block-level, and rewrite exactly those spans as <div>s before
-// handing the article to the document.
+//   * Entries are built from custom elements -- <top-g>, <sn-blk>, <x-g-blk>
+//     in Oxford, styled <span>s elsewhere -- and laid out with
+//     "display: block" in the dictionary's stylesheet. QTextDocument decides
+//     block versus inline from the element name alone and ignores `display`
+//     entirely, so a whole entry collapses into one unbroken paragraph.
+//
+//   * Tag names carry an XML namespace, as in <xhtml:br> and <xhtml:a>, which
+//     Qt does not recognise, so line breaks and links are silently dropped.
+//
+// The block elements are therefore wrapped in a <div> rather than renamed to
+// one. Wrapping gets the line break while leaving the original element in
+// place, which matters because these stylesheets select on the element name:
+// renaming <top-g> to <div> would make the entry break correctly and lose
+// every colour and font it had.
 #pragma once
 
-#include <QHash>
 #include <QSet>
 #include <QString>
 
@@ -21,18 +26,18 @@ namespace htmlblocks {
 
 struct BlockRules
 {
-    QSet<QString> classes; // class names the stylesheet lays out as blocks
-    bool everySpan = false; // a bare "span { display: block }" rule
+    QSet<QString> classes;  // class names laid out as blocks
+    QSet<QString> elements; // element names laid out as blocks, lower-cased
 
-    bool isEmpty() const { return classes.isEmpty() && !everySpan; }
+    bool isEmpty() const { return classes.isEmpty() && elements.isEmpty(); }
 };
 
-// Collects the class names a stylesheet gives a block-forming display.
+// Reads which classes and elements a stylesheet gives a block-forming display.
 BlockRules rulesFromStyleSheet(const QString &css);
 
-// Rewrites <span class="..."> as <div class="..."> where `rules` says the
-// class is block-level, keeping the tags balanced.
-QString promoteSpans(const QString &html, const BlockRules &rules);
+// Strips XML namespace prefixes from tag names and wraps block-level elements
+// in <div>, keeping the tags balanced.
+QString adaptForTextDocument(const QString &html, const BlockRules &rules);
 
 } // namespace htmlblocks
 } // namespace qmdict

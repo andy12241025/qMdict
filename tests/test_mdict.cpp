@@ -9,6 +9,7 @@
 #include "../src/mdict/library.h"
 #include "../src/mdict/mdictfile.h"
 #include "../src/ui/darkcolours.h"
+#include "../src/ui/cssfilter.h"
 #include "../src/ui/htmlblocks.h"
 #include "../src/util/lzo1x.h"
 #include "../src/util/ripemd128.h"
@@ -888,15 +889,16 @@ void testHtmlBlocks()
     // What the stylesheet declares block-level.
     check(rulesFromStyleSheet(QStringLiteral(".def { display: block; }")).classes.contains("def"),
           "a class rule is picked up");
-    check(rulesFromStyleSheet(QStringLiteral("span.def{display:block}")).classes.contains("def"),
-          "a tag-qualified class rule is picked up");
+    check(rulesFromStyleSheet(QStringLiteral("top-g{display:block;clear:left}"))
+              .elements.contains("top-g"),
+          "a custom element rule is picked up");
     check(rulesFromStyleSheet(QStringLiteral(".a, .b { display: block }")).classes.contains("b"),
           "grouped selectors are picked up");
 
     // Only the rightmost compound is the rule's target.
-    const BlockRules descendant = rulesFromStyleSheet(QStringLiteral(".entry .def{display:block}"));
-    check(descendant.classes.contains("def") && !descendant.classes.contains("entry"),
-          "a descendant selector targets only its rightmost class");
+    const BlockRules descendant = rulesFromStyleSheet(QStringLiteral("x-g-blk cf-blk{display:block}"));
+    check(descendant.elements.contains("cf-blk") && !descendant.elements.contains("x-g-blk"),
+          "a descendant selector targets only its rightmost element");
 
     check(rulesFromStyleSheet(QStringLiteral(".c { display: inline }")).isEmpty(),
           "inline elements are left alone");
@@ -904,61 +906,132 @@ void testHtmlBlocks()
           "inline-block does not force a line break");
     check(rulesFromStyleSheet(QStringLiteral(".c { color: red }")).isEmpty(),
           "rules without display are ignored");
-    check(rulesFromStyleSheet(QStringLiteral("span { display: block }")).everySpan,
-          "a bare span rule promotes every span");
-    check(rulesFromStyleSheet(QStringLiteral(".li { display: list-item }")).classes.contains("li"),
-          "list-item counts as block-forming");
-    check(!rulesFromStyleSheet(QStringLiteral("@media print { .x { display: block } }")).isEmpty(),
-          "at-rules do not break parsing");
 
-    // Rewriting.
+    // Standard elements are Qt's business, not ours.
+    check(rulesFromStyleSheet(QStringLiteral("img{display:block}")).isEmpty(),
+          "standard elements are not wrapped");
+    check(rulesFromStyleSheet(QStringLiteral("unbox h2{display:block}")).isEmpty(),
+          "a standard element as the target is ignored");
+
+    // Generated content must not turn its element into a block.
+    check(rulesFromStyleSheet(QStringLiteral("h-g:after{display:block}")).isEmpty(),
+          "a pseudo-element rule does not promote its element");
+
+    // Comments must not be mistaken for selectors.
+    const BlockRules commented =
+        rulesFromStyleSheet(QStringLiteral("/* cancel the quotes */\nund{display:block}"));
+    check(commented.elements.contains("und") && commented.elements.size() == 1,
+          "css comments are stripped before parsing");
+
+    check(rulesFromStyleSheet(QStringLiteral("unbox[type=\"colloc\"]{display:block}"))
+              .elements.contains("unbox"),
+          "attribute selectors still yield their element");
+
+    // --- rewriting -------------------------------------------------------
     BlockRules rules;
+    rules.elements = {QStringLiteral("top-g")};
     rules.classes = {QStringLiteral("def")};
 
-    checkEqual(promoteSpans(QStringLiteral("<span class=\"def\">a</span>"), rules).toUtf8(),
-               QByteArrayLiteral("<div class=\"def\">a</div>"), "a matching span becomes a div");
-    checkEqual(promoteSpans(QStringLiteral("<span class=\"other\">a</span>"), rules).toUtf8(),
-               QByteArrayLiteral("<span class=\"other\">a</span>"),
-               "a non-matching span is untouched");
-    checkEqual(promoteSpans(QStringLiteral("<span class='def'>a</span>"), rules).toUtf8(),
-               QByteArrayLiteral("<div class='def'>a</div>"), "single-quoted class attributes work");
-    checkEqual(promoteSpans(QStringLiteral("<span class=def>a</span>"), rules).toUtf8(),
-               QByteArrayLiteral("<div class=def>a</div>"), "unquoted class attributes work");
-    checkEqual(promoteSpans(QStringLiteral("<span class=\"hw def\">a</span>"), rules).toUtf8(),
-               QByteArrayLiteral("<div class=\"hw def\">a</div>"),
-               "one matching class among several is enough");
+    // Wrapped, not renamed: the element must survive so element-name CSS
+    // selectors keep matching it.
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a</top-g>"), rules).toUtf8(),
+               QByteArrayLiteral("<div><top-g>a</top-g></div>"),
+               "a block element is wrapped rather than renamed");
+    checkEqual(adaptForTextDocument(QStringLiteral("<span class=\"def\">a</span>"), rules).toUtf8(),
+               QByteArrayLiteral("<div><span class=\"def\">a</span></div>"),
+               "a block class is wrapped");
+    checkEqual(adaptForTextDocument(QStringLiteral("<other>a</other>"), rules).toUtf8(),
+               QByteArrayLiteral("<other>a</other>"), "an inline element is untouched");
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g eid=\"x\">a</top-g>"), rules).toUtf8(),
+               QByteArrayLiteral("<div><top-g eid=\"x\">a</top-g></div>"),
+               "attributes are preserved");
 
-    // Nesting must keep the tags balanced.
-    checkEqual(promoteSpans(
-                   QStringLiteral("<span class=\"def\">a<span class=\"hw\">b</span>c</span>"),
-                   rules)
-                   .toUtf8(),
-               QByteArrayLiteral("<div class=\"def\">a<span class=\"hw\">b</span>c</div>"),
-               "an inner non-matching span stays a span");
+    // Namespace prefixes, which Qt would otherwise drop on the floor.
+    checkEqual(adaptForTextDocument(QStringLiteral("a<xhtml:br></xhtml:br>b"), rules).toUtf8(),
+               QByteArrayLiteral("a<br>b"), "a namespaced line break becomes a real one");
+    checkEqual(adaptForTextDocument(QStringLiteral("<xhtml:a href=\"x\">t</xhtml:a>"), rules).toUtf8(),
+               QByteArrayLiteral("<a href=\"x\">t</a>"), "a namespaced link becomes a real one");
 
-    rules.classes.insert(QStringLiteral("hw"));
-    checkEqual(promoteSpans(
-                   QStringLiteral("<span class=\"hw\">a<span class=\"def\">b</span></span>"),
-                   rules)
-                   .toUtf8(),
-               QByteArrayLiteral("<div class=\"hw\">a<div class=\"def\">b</div></div>"),
-               "nested matching spans are both promoted");
+    // Nesting and balance.
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a<b>c</b></top-g>"), rules).toUtf8(),
+               QByteArrayLiteral("<div><top-g>a<b>c</b></top-g></div>"),
+               "nested standard elements are left alone");
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g><top-g>x</top-g></top-g>"), rules).toUtf8(),
+               QByteArrayLiteral("<div><top-g><div><top-g>x</top-g></div></top-g></div>"),
+               "nested block elements each get a wrapper");
 
-    // Robustness against the malformed markup dictionaries actually contain.
-    checkEqual(promoteSpans(QStringLiteral("plain text</span>more"), rules).toUtf8(),
-               QByteArrayLiteral("plain text</span>more"), "a stray close tag is left alone");
-    checkEqual(promoteSpans(QStringLiteral("a < b and c > d"), rules).toUtf8(),
+    // The malformed markup dictionaries really contain.
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>unclosed"), rules).toUtf8(),
+               QByteArrayLiteral("<div><top-g>unclosed</top-g></div>"),
+               "an unclosed block element is balanced");
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g><i>x</top-g>"), rules).toUtf8(),
+               QByteArrayLiteral("<div><top-g><i>x</i></top-g></div>"),
+               "an unclosed inner element is balanced too");
+    checkEqual(adaptForTextDocument(QStringLiteral("text</top-g>more"), rules).toUtf8(),
+               QByteArrayLiteral("text</top-g>more"), "a stray close tag is left alone");
+    checkEqual(adaptForTextDocument(QStringLiteral("a < b and c > d"), rules).toUtf8(),
                QByteArrayLiteral("a < b and c > d"), "unescaped angle brackets survive");
-    checkEqual(promoteSpans(QStringLiteral("<span class=\"def\">unclosed"), rules).toUtf8(),
-               QByteArrayLiteral("<div class=\"def\">unclosed"), "an unclosed span still opens");
-    checkEqual(promoteSpans(QStringLiteral("<spanish>x</spanish>"), rules).toUtf8(),
-               QByteArrayLiteral("<spanish>x</spanish>"),
-               "tags merely starting with 'span' are not touched");
+    checkEqual(adaptForTextDocument(QStringLiteral("<img src=\"x.png\">t"), rules).toUtf8(),
+               QByteArrayLiteral("<img src=\"x.png\">t"), "void elements are not wrapped");
+    checkEqual(adaptForTextDocument(QStringLiteral("<!-- note -->x"), rules).toUtf8(),
+               QByteArrayLiteral("<!-- note -->x"), "comments pass through");
 
     BlockRules none;
-    checkEqual(promoteSpans(QStringLiteral("<span class=\"def\">a</span>"), none).toUtf8(),
-               QByteArrayLiteral("<span class=\"def\">a</span>"),
-               "no rules means no rewriting");
+    checkEqual(adaptForTextDocument(QStringLiteral("<top-g>a</top-g>"), none).toUtf8(),
+               QByteArrayLiteral("<top-g>a</top-g>"), "no rules means no wrapping");
+    checkEqual(adaptForTextDocument(QStringLiteral("x<xhtml:br>y"), none).toUtf8(),
+               QByteArrayLiteral("x<br>y"),
+               "namespace prefixes are fixed even without block rules");
+}
+
+// --- stylesheet filtering -------------------------------------------------
+
+void testCssFilter()
+{
+    using namespace qmdict::cssfilter;
+
+    // Declarations Qt cannot act on are dropped, and rules left empty go too.
+    check(usable(QStringLiteral("top-g{display:block;clear:left}")).isEmpty(),
+          "a rule Qt cannot act on is dropped entirely");
+    check(usable(QStringLiteral("d{color:red;float:left}")).contains(QLatin1String("color:red")),
+          "a usable declaration is kept");
+    check(!usable(QStringLiteral("d{color:red;float:left}")).contains(QLatin1String("float")),
+          "an unusable declaration is stripped from a kept rule");
+
+    check(usable(QStringLiteral("@font-face{font-family:'X';src:url(x.ttf)}")).isEmpty(),
+          "at-rules are dropped");
+    check(usable(QStringLiteral("/* note */ d{color:red}")).contains(QLatin1String("color:red")),
+          "comments are stripped");
+    check(usable(QStringLiteral("d::before{color:red}")).isEmpty(),
+          "generated-content rules are dropped");
+    check(usable(QStringLiteral("d:after{color:red}")).isEmpty(),
+          "the single-colon spelling is dropped too");
+
+    // Rules that cannot match this article are dropped.
+    const QString sheet = QStringLiteral("top-g{color:red}\nabsent-tag{color:blue}\n"
+                                         ".here{color:green}\n.gone{color:grey}\n*{color:black}\n");
+    const QString html = QStringLiteral("<top-g><span class=\"here\">x</span></top-g>");
+    const QString kept = relevantTo(sheet, html);
+
+    check(kept.contains(QLatin1String("top-g")), "a rule for a present element is kept");
+    check(!kept.contains(QLatin1String("absent-tag")), "a rule for an absent element is dropped");
+    check(kept.contains(QLatin1String(".here")), "a rule for a present class is kept");
+    check(!kept.contains(QLatin1String(".gone")), "a rule for an absent class is dropped");
+    check(kept.contains(QLatin1String("*")), "the universal selector is always kept");
+
+    // The wrappers this rendering adds must not be filtered away.
+    check(relevantTo(QStringLiteral("div{margin:0}"), QStringLiteral("<top-g>x</top-g>"))
+              .contains(QLatin1String("div")),
+          "rules for the wrapper element survive");
+
+    // Only the rightmost compound has to exist for a rule to be reachable.
+    check(relevantTo(QStringLiteral("absent x{color:red}"), QStringLiteral("<x>1</x>"))
+              .contains(QLatin1String("color:red")),
+          "an absent ancestor does not make a rule unreachable");
+
+    check(relevantTo(QString(), QStringLiteral("<p>x</p>")).isEmpty(), "an empty sheet stays empty");
+    checkEqual(relevantTo(QStringLiteral("d{color:red}"), QString()).toUtf8(),
+               QByteArrayLiteral("d{color:red}"), "no html means no filtering");
 }
 
 // --- dark mode colours ----------------------------------------------------
@@ -1051,6 +1124,7 @@ int main(int argc, char *argv[])
     testWavPassthroughAndDetection();
     testSpeexDecoding();
     testHtmlBlocks();
+    testCssFilter();
     testDarkColours();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

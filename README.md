@@ -128,7 +128,7 @@ the tests on Windows — and attaches the zips to tagged releases.
 src/util/       ripemd128, lzo1x, block codec, legacy text decoding
 src/mdict/      mdictfile (container parsing + index), dictionary (mdx+mdd), library (folder scan)
 src/audio/      ogg demuxer, speex/mp3/wav decoding, playback
-src/ui/         mainwindow, articleview (QTextBrowser + .mdd resources), theme, dark-mode colours
+src/ui/         mainwindow, articleview, theme, dark-mode colours, block layout and css filtering
 third_party/    speex (decoder only) and minimp3
 resources/      generated icon set and the Windows .ico
 tools/          make_icon.cpp, which draws that icon set
@@ -167,10 +167,22 @@ It is located from the `<link rel="stylesheet">` tag in the article, looking fir
 that keep it loose on disk would otherwise render as one unbroken paragraph.
 
 That paragraph problem has a second cause worth knowing about. `QTextDocument` decides block
-versus inline layout from the element name alone: a `display: block` on a `<span>` is ignored
-however it is delivered. Dictionaries such as Oxford build an entire entry out of styled
-`<span>`s, so qMdict reads which classes the stylesheet lays out as blocks and rewrites exactly
-those spans as `<div>`s before rendering.
+versus inline layout from the element name alone, and ignores `display` however it is delivered
+— stylesheet, inline style or `<style>` block alike. Dictionaries such as Oxford build an entry
+entirely out of custom elements (`<top-g>`, `<sn-blk>`, `<x-g-blk>`) laid out with
+`display: block`, so under Qt the whole entry collapses into one run of text.
+
+qMdict reads which elements and classes the stylesheet makes block-level and **wraps** those in
+a `<div>`. Wrapping rather than renaming is deliberate: these stylesheets select on the element
+name, so turning `<top-g>` into `<div>` would fix the line breaks and lose every colour and font
+the entry had. Tag names carrying an XML namespace, such as `<xhtml:br>` and `<xhtml:a>`, are
+also un-prefixed, since Qt would otherwise drop the line break or the link on the floor.
+
+One consequence is worth the space it takes. Qt tests every CSS rule against every element, and
+these stylesheets are written for a browser, so most of what they contain — font faces,
+generated content, floats — cannot affect the result. Rules Qt cannot act on, and rules whose
+target does not occur in the entry being shown, are removed before rendering. On a long Oxford
+entry that is the difference between a snappy lookup and a visible pause.
 
 Finally, dictionaries assume a white page, so in dark mode their colours are remapped: text is
 raised to a readable lightness with its hue intact, and panels meant to be pale are darkened.

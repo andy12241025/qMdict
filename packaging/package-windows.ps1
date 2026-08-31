@@ -66,6 +66,63 @@ Copy-Item $exe.FullName $stage
     --no-compiler-runtime --dir $stage (Join-Path $stage "qMdict.exe")
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
+# windeployqt is deliberately generous. A dictionary reader never opens a
+# socket, a database or a Direct3D device, so whole plugin families and the
+# libraries behind them are dead weight.
+$before = (Get-ChildItem $stage -Recurse -File | Measure-Object Length -Sum).Sum
+foreach ($group in @("networkinformation", "tls", "sqldrivers", "generic", "iconengines")) {
+    $path = Join-Path $stage $group
+    if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+}
+
+# Anything left that nothing imports goes too. Walking the import tables keeps
+# this honest: a DLL is only removed when no shipped binary references it.
+function Get-Imports($file) {
+    (& dumpbin /nologo /dependents $file) |
+        Select-String -Pattern '^\s{4}(\S+\.dll)$' |
+        ForEach-Object { $_.Matches[0].Groups[1].Value.ToLower() }
+}
+
+$roots = @(Join-Path $stage "qMdict.exe")
+$roots += Get-ChildItem -Path $stage -Recurse -Filter *.dll |
+    Where-Object { $_.DirectoryName -ne $stage } | ForEach-Object { $_.FullName }
+
+$needed = [System.Collections.Generic.HashSet[string]]::new()
+$queue = [System.Collections.Generic.Queue[string]]::new()
+foreach ($r in $roots) { $queue.Enqueue($r) }
+
+while ($queue.Count -gt 0) {
+    $current = $queue.Dequeue()
+    foreach ($import in Get-Imports $current) {
+        if ($needed.Add($import)) {
+            $candidate = Join-Path $stage $import
+            if (Test-Path $candidate) { $queue.Enqueue($candidate) }
+        }
+    }
+}
+
+foreach ($dll in Get-ChildItem -Path $stage -Filter *.dll -File) {
+    if (-not $needed.Contains($dll.Name.ToLower())) {
+        Write-Host "   dropping unused $($dll.Name)"
+        Remove-Item -Force $dll.FullName
+    }
+}
+
+# Nothing may be missing after that pruning.
+$missing = @()
+foreach ($binary in @(Join-Path $stage "qMdict.exe") +
+                    (Get-ChildItem -Path $stage -Recurse -Filter *.dll | ForEach-Object { $_.FullName })) {
+    foreach ($import in Get-Imports $binary) {
+        if (Test-Path (Join-Path $QtPrefix "bin\$import")) {
+            if (-not (Test-Path (Join-Path $stage $import))) { $missing += $import }
+        }
+    }
+}
+if ($missing.Count -gt 0) { throw "pruning removed still-needed libraries: $($missing -join ', ')" }
+
+$after = (Get-ChildItem $stage -Recurse -File | Measure-Object Length -Sum).Sum
+Write-Host (">> trimmed {0:N1} MB to {1:N1} MB" -f ($before / 1MB), ($after / 1MB))
+
 # On Windows the executable sits at the top level, so data\ is beside it and
 # --portable resolves there without a launcher.
 @"

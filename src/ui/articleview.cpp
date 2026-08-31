@@ -115,7 +115,7 @@ void ArticleView::showMessage(const QString &title, const QString &body)
                 .arg(title.toHtmlEscaped(), body.toHtmlEscaped()));
 }
 
-QString ArticleView::collectStyles() const
+QString ArticleView::collectStyles()
 {
     const QString base = theme::articleBaseCss(m_fontPointSize);
     if (!m_useDictionaryStyles)
@@ -125,9 +125,12 @@ QString ArticleView::collectStyles() const
     for (const auto &article : m_articles) {
         if (!article.first)
             continue;
-        // Resolved from the article's own <link> tags, which is why this uses
-        // the raw HTML rather than the sanitised copy.
-        const QString embedded = article.first->styleSheetFor(article.second);
+
+        // Only the rules Qt can act on, and of those only the ones this
+        // article can actually match. On a long Oxford entry that removes
+        // about a second of selector matching.
+        const QString embedded =
+            cssfilter::relevantTo(usableStyleSheetFor(article.first, article.second), article.second);
         if (!embedded.isEmpty())
             css += QLatin1Char('\n') + theme::adaptStyleSheetForDark(embedded);
     }
@@ -137,6 +140,16 @@ QString ArticleView::collectStyles() const
     return css + QLatin1Char('\n') + base;
 }
 
+const QString &ArticleView::usableStyleSheetFor(Dictionary *dictionary, const QString &articleHtml)
+{
+    const auto cached = m_usableStyles.constFind(dictionary);
+    if (cached != m_usableStyles.constEnd())
+        return cached.value();
+
+    return *m_usableStyles.insert(dictionary,
+                                  cssfilter::usable(dictionary->styleSheetFor(articleHtml)));
+}
+
 const htmlblocks::BlockRules &ArticleView::blockRulesFor(Dictionary *dictionary,
                                                          const QString &articleHtml)
 {
@@ -144,6 +157,8 @@ const htmlblocks::BlockRules &ArticleView::blockRulesFor(Dictionary *dictionary,
     if (cached != m_blockRules.constEnd())
         return cached.value();
 
+    // Block rules come from the dictionary's own stylesheet, before filtering:
+    // `display` is exactly one of the properties the filter strips.
     return *m_blockRules.insert(
         dictionary, htmlblocks::rulesFromStyleSheet(dictionary->styleSheetFor(articleHtml)));
 }
@@ -172,8 +187,14 @@ void ArticleView::rebuild()
         body += QStringLiteral("<p class=\"qmdict-source\">%1</p>\n").arg(name.toHtmlEscaped());
 
         QString html = sanitise(article.second);
-        if (m_useDictionaryStyles && article.first)
-            html = htmlblocks::promoteSpans(html, blockRulesFor(article.first, article.second));
+        if (article.first) {
+            // Namespace prefixes are fixed even with dictionary styling off,
+            // since <xhtml:br> is a line break in any theme.
+            const htmlblocks::BlockRules rules =
+                m_useDictionaryStyles ? blockRulesFor(article.first, article.second)
+                                      : htmlblocks::BlockRules{};
+            html = htmlblocks::adaptForTextDocument(html, rules);
+        }
 
         body += html;
         body += QLatin1String("\n");
