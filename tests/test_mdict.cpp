@@ -21,6 +21,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTextDocument>
 
 #include <speex/speex.h>
 #include <speex/speex_header.h>
@@ -948,6 +949,23 @@ void testHtmlBlocks()
                      QStringLiteral("<top-g><i>x</top-g>")).toUtf8(),
                QByteArrayLiteral("<div><top-g><i>x</i></top-g></div>"),
                "an unclosed inner element is balanced too");
+
+    // Check Qt's actual paragraphs: the adapted markup used to put the opening
+    // bracket on its own line after the nested part-of-speech block.
+    const QString grammarCss = QStringLiteral("top-g,pos-g,sn-gs{display:block}");
+    const QString grammarHtml = QStringLiteral(
+        "<top-g><pos-g>noun</pos-g><gram-g><gram-blk> [<gram>uncountable</gram>] "
+        "</gram-blk></gram-g><label-g-blk>(<label-g>specialist</label-g>)</label-g-blk>"
+        "<sn-gs>definition</sn-gs></top-g>");
+    QTextDocument grammarDocument;
+    grammarDocument.setHtml(apply(grammarCss, grammarHtml));
+    checkEqual(grammarDocument.toPlainText().toUtf8(),
+               QByteArrayLiteral("noun\n[uncountable] (specialist)\ndefinition"),
+               "grammar brackets and usage label share a paragraph after a nested block");
+    grammarDocument.setHtml(apply(grammarCss, QStringLiteral(
+        "<top-g><pos-g>noun</pos-g>[<gram>uncountable</gram>]</top-g>")));
+    checkEqual(grammarDocument.toPlainText().toUtf8(), QByteArrayLiteral("noun\n[uncountable]"),
+               "bare inline text after a nested block stays together");
 
     LayoutRules none;
     checkEqual(adaptForTextDocument(QStringLiteral("text</top-g>more"), none).toUtf8(),

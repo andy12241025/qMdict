@@ -463,14 +463,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
     if (!m_quitting && m_tray && m_closeToTrayAction->isChecked()) {
         hide();
         event->ignore();
-
-        if (!m_trayHintShown) {
-            m_trayHintShown = true;
-            m_tray->showMessage(QStringLiteral("qMdict is still running"),
-                                QStringLiteral("Click the tray icon to bring it back, or use "
-                                               "Quit there to close it."),
-                                QSystemTrayIcon::Information, 4000);
-        }
         return;
     }
 

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=qMdict
+Comment=@PROJECT_DESCRIPTION@
+Exec=qMdict
+Icon=qmdict
+Categories=Utility;Dictionary;Education;
+Terminal=false

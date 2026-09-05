@@ -98,7 +98,6 @@ private:
 
     QSystemTrayIcon *m_tray = nullptr;
     bool m_quitting = false;
-    bool m_trayHintShown = false;
 
     QStringList m_history;
     QStringList m_recent;   // lookup history, most recent first

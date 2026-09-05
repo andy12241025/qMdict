@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(qMdict
-    VERSION 1.0.3
+    VERSION 1.0.4
     DESCRIPTION "Fast offline MDict (.mdx/.mdd) dictionary reader"
     LANGUAGES C CXX)
 
@@ -147,3 +147,28 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS qMdict RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(UNIX AND NOT APPLE)
+    configure_file(resources/qmdict.desktop.in qmdict.desktop @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qmdict.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    foreach(size 16 24 32 48 64 128 256)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/qmdict-${size}.png"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps"
+            RENAME qmdict.png)
+    endforeach()
+endif()
+
+# Native Debian package.  Qt remains a normal system dependency rather than
+# being bundled, so upgrades and security fixes are supplied by the distro.
+set(CPACK_GENERATOR "DEB")
+set(CPACK_PACKAGE_NAME "qmdict")
+set(CPACK_PACKAGE_VENDOR "qMdict contributors")
+set(CPACK_PACKAGE_CONTACT "qMdict contributors")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "qMdict contributors")
+set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_FILE_NAME "qMdict-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}.deb")
+include(CPack)

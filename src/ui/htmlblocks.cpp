@@ -140,6 +140,8 @@ struct OpenElement
     bool wrapped = false;
     bool hidden = false;
     bool unwrapped = false;
+    bool needsContinuation = false;
+    bool continuation = false;
 };
 
 } // namespace
@@ -257,13 +259,40 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
     QList<OpenElement> open;
     int suppressed = 0; // depth of hidden elements currently being skipped
 
+    // Qt can split text across paragraphs when custom inline elements follow
+    // a nested block (Oxford's "[<gram>uncountable</gram>]", for example).
+    // Give that inline run an explicit container, retaining the custom tags
+    // so their colour and font selectors still apply.
+    auto beginContinuation = [&]() {
+        if (!open.isEmpty() && open.last().needsContinuation) {
+            out += QLatin1String("<div>");
+            open.last().needsContinuation = false;
+            open.last().continuation = true;
+        }
+    };
+    auto endContinuation = [&]() {
+        if (!open.isEmpty()) {
+            if (open.last().continuation)
+                out += QLatin1String("</div>");
+            open.last().continuation = false;
+            open.last().needsContinuation = false;
+        }
+    };
+    auto afterBlock = [&]() {
+        if (!open.isEmpty())
+            open.last().needsContinuation = true;
+    };
+
     int i = 0;
     const int n = html.size();
 
     while (i < n) {
         if (html.at(i) != QLatin1Char('<')) {
-            if (suppressed == 0)
+            if (suppressed == 0) {
+                if (!html.at(i).isSpace())
+                    beginContinuation();
                 out += html.at(i);
+            }
             ++i;
             continue;
         }
@@ -325,15 +354,19 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
 
             // Close anything the dictionary left open inside this element.
             while (open.size() > match + 1) {
+                endContinuation();
                 const OpenElement inner = open.takeLast();
                 if (inner.hidden)
                     --suppressed;
                 else if (suppressed == 0 && !inner.unwrapped)
                     out += QStringLiteral("</%1>").arg(inner.name);
-                if (inner.wrapped && suppressed == 0)
+                if (inner.wrapped && suppressed == 0) {
                     out += QStringLiteral("</div>");
+                    afterBlock();
+                }
             }
 
+            endContinuation();
             const OpenElement self = open.takeLast();
             if (self.hidden) {
                 --suppressed;
@@ -342,8 +375,10 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
             if (suppressed == 0) {
                 if (!self.unwrapped)
                     out += tag;
-                if (self.wrapped)
+                if (self.wrapped) {
                     out += QStringLiteral("</div>");
+                    afterBlock();
+                }
             }
             continue;
         }
@@ -398,6 +433,11 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
 
         const bool wrap = applies(rules.blocks);
 
+        if (wrap)
+            endContinuation();
+        else
+            beginContinuation();
+
         if (isVoidElement(key) || selfClosing) {
             out += tag;
             continue;
@@ -412,6 +452,7 @@ QString adaptForTextDocument(const QString &html, const LayoutRules &rules)
 
     // Balance anything the dictionary never closed.
     while (!open.isEmpty()) {
+        endContinuation();
         const OpenElement inner = open.takeLast();
         if (inner.hidden) {
             --suppressed;
