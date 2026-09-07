@@ -1079,6 +1079,42 @@ void testCssFilter()
     check(usable(QStringLiteral("d:after{color:red}")).isEmpty(),
           "the single-colon spelling is dropped too");
 
+    // Margins and padding survive only where Qt honours them, which is on the
+    // elements it lays out as blocks. Resolving them anywhere else is most of
+    // what importing a long entry costs, and the result is thrown away.
+    check(usable(QStringLiteral("p{margin:1em}")).contains(QLatin1String("margin")),
+          "a margin on a block element is kept");
+    check(usable(QStringLiteral("x-g x{margin-right:.5em;color:red}"))
+              .contains(QLatin1String("color:red")),
+          "the rest of an inline rule survives");
+    check(!usable(QStringLiteral("x-g x{margin-right:.5em;color:red}"))
+               .contains(QLatin1String("margin")),
+          "a margin on an inline element is dropped");
+    check(usable(QStringLiteral("x-g p{padding-left:1em}")).contains(QLatin1String("padding")),
+          "an inline ancestor does not disqualify a block target");
+    check(usable(QStringLiteral(".chip{padding:2px}")).contains(QLatin1String("padding")),
+          "a rule selecting on class alone keeps its box, since it can land anywhere");
+    check(usable(QStringLiteral("xhtml\\:table{padding:1em}")).contains(QLatin1String("padding")),
+          "a namespaced element is recognised by its local name");
+    check(!usable(QStringLiteral("a:link{padding-top:1em}")).contains(QLatin1String("padding")),
+          "a pseudo-class is not mistaken for a namespace");
+    check(usable(QStringLiteral("x-g x,td{margin:1em}")).contains(QLatin1String("margin")),
+          "one block alternative is enough to keep the box");
+    check(usable(QStringLiteral("td[align=left]{padding:1em}")).contains(QLatin1String("padding")),
+          "an attribute filter does not hide the element name");
+
+    // Font families are collected so they can be resolved before a lookup
+    // rather than during one.
+    const QStringList families =
+        fontFamilies(QStringLiteral("d{font-family:'Optima', Georgia, serif}\n"
+                                    "e{font:bold 12px/1.2 Palatino, serif}\n"));
+    check(families.contains(QLatin1String("Optima")), "a quoted family is collected");
+    check(families.contains(QLatin1String("Georgia")), "a bare family is collected");
+    check(families.count(QLatin1String("serif")) == 1, "a repeated family is collected once");
+    check(families.contains(QLatin1String("Palatino")), "the font shorthand is read too");
+    check(!families.contains(QLatin1String("bold 12px/1.2 Palatino")),
+          "the shorthand's size and weight are not mistaken for a family");
+
     // Rules that cannot match this article are dropped.
     const QString sheet = QStringLiteral("top-g{color:red}\nabsent-tag{color:blue}\n"
                                          ".here{color:green}\n.gone{color:grey}\n*{color:black}\n");

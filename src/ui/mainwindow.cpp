@@ -38,6 +38,7 @@ namespace {
 constexpr int kSuggestionLimit = 400;
 constexpr int kHistoryLimit = 200;
 constexpr int kSearchDelayMs = 120;
+constexpr int kPreviewDelayMs = 220;
 
 // Qt treats a sequence listed twice on one action as ambiguous and then
 // triggers neither, so overlapping spellings have to be collapsed.
@@ -90,6 +91,10 @@ MainWindow::MainWindow(const QString &cacheDir, QWidget *parent)
         if (loaded > 0) {
             updateSuggestions();
             m_search->setFocus();
+
+            // Queued rather than run here, so the window is painted and usable
+            // while the render caches are built behind it.
+            QTimer::singleShot(0, this, &MainWindow::warmUpRendering);
         } else {
             m_article->showMessage(QStringLiteral("No dictionaries found"),
                                    QStringLiteral("Choose a folder that contains .mdx files. "
@@ -121,6 +126,7 @@ void MainWindow::buildUi()
     m_wordList->setUniformItemSizes(true);
     m_wordList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_wordList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_wordList->setContextMenuPolicy(Qt::CustomContextMenu);
 
     auto *left = new QWidget(this);
     auto *leftLayout = new QVBoxLayout(left);
@@ -154,7 +160,12 @@ void MainWindow::buildUi()
     m_searchTimer->setSingleShot(true);
     m_searchTimer->setInterval(kSearchDelayMs);
 
+    m_previewTimer = new QTimer(this);
+    m_previewTimer->setSingleShot(true);
+    m_previewTimer->setInterval(kPreviewDelayMs);
+
     connect(m_searchTimer, &QTimer::timeout, this, &MainWindow::updateSuggestions);
+    connect(m_previewTimer, &QTimer::timeout, this, &MainWindow::showCurrentSelection);
     connect(m_search, &QLineEdit::textChanged, this, [this]() { m_searchTimer->start(); });
     connect(m_search, &QLineEdit::returnPressed, this, [this]() {
         const QString word = m_search->text().trimmed();
@@ -172,11 +183,17 @@ void MainWindow::buildUi()
         if (!index.isValid())
             return;
         const QString word = index.data(Qt::DisplayRole).toString();
-        rememberLookup(word);
+
+        // A word picked out of the recent list is already in it. Promoting it
+        // would shuffle the list out from under the cursor that just clicked.
+        if (!m_showingHistory)
+            rememberLookup(word);
         navigateTo(word);
     };
     connect(m_wordList, &QListView::clicked, this, chooseFromList);
     connect(m_wordList, &QListView::activated, this, chooseFromList);
+    connect(m_wordList, &QListView::customContextMenuRequested, this,
+            &MainWindow::showWordListMenu);
     connect(m_article, &ArticleView::wordActivated, this, [this](const QString &word) {
         rememberLookup(word);
         syncSearchTo(word);
@@ -237,15 +254,18 @@ void MainWindow::buildActions()
                                    },
                                    QKeySequence(QStringLiteral("Ctrl+L")));
 
+    m_clearHistoryAction = makeAction(QStringLiteral("Clear &History"), &MainWindow::clearHistory);
+
     auto *goMenu = menuBar()->addMenu(QStringLiteral("&Go"));
     goMenu->addAction(m_backAction);
     goMenu->addAction(m_forwardAction);
     goMenu->addSeparator();
     goMenu->addAction(focusAction);
     goMenu->addSeparator();
-    goMenu->addAction(makeAction(QStringLiteral("Clear &History"), &MainWindow::clearHistory));
+    goMenu->addAction(m_clearHistoryAction);
 
     m_article->setNavigationActions(m_backAction, m_forwardAction);
+    m_article->setClearHistoryAction(m_clearHistoryAction);
 
     auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     auto *themeMenu = viewMenu->addMenu(QStringLiteral("&Theme"));
@@ -378,6 +398,7 @@ void MainWindow::restoreSettings()
     m_recent = settings.value(QStringLiteral("library/history")).toStringList();
     while (m_recent.size() > kHistoryLimit)
         m_recent.removeLast();
+    m_clearHistoryAction->setEnabled(!m_recent.isEmpty());
 
     if (settings.contains(QStringLiteral("ui/geometry")))
         restoreGeometry(settings.value(QStringLiteral("ui/geometry")).toByteArray());
@@ -445,6 +466,13 @@ void MainWindow::toggleWindowVisible()
     showNormal();
     raise();
     activateWindow();
+
+    // Coming back from the tray means a new word, so the box is emptied rather
+    // than left holding the last one for the reader to clear first. The list
+    // falls back to recent lookups, which is where an empty box leads anyway.
+    m_search->clear();
+    m_searchTimer->stop();
+    updateSuggestions();
     m_search->setFocus();
 }
 
@@ -505,6 +533,11 @@ void MainWindow::openFolder(const QString &folder)
 
     m_folder = folder;
     m_wordModel->setStringList({});
+
+    // Reloading frees the dictionaries the view is holding pointers to, both in
+    // its per-dictionary caches and in the article it is showing.
+    m_article->forgetDictionaries();
+
     m_library.setCacheDirectory(m_cacheDir);
     m_library.loadFolder(folder);
     setWindowTitle(QStringLiteral("qMdict - %1").arg(QDir(folder).dirName()));
@@ -520,6 +553,11 @@ void MainWindow::updateSuggestions()
 {
     const QString prefix = m_search->text().trimmed();
 
+    // syncSearchTo() has already shown the article it wants; refilling the list
+    // underneath it must not schedule a second rendering of the same one.
+    const bool preview = !m_suppressSelectionNavigation;
+    m_previewTimer->stop();
+
     if (prefix.isEmpty()) {
         // An empty box is the natural place for what you looked up before.
         m_wordModel->setStringList(m_recent);
@@ -534,8 +572,18 @@ void MainWindow::updateSuggestions()
 
     m_showingHistory = false;
     m_wordModel->setStringList(m_library.suggestions(prefix, kSuggestionLimit));
-    if (m_wordModel->rowCount() > 0)
-        m_wordList->setCurrentIndex(m_wordModel->index(0, 0));
+    if (m_wordModel->rowCount() == 0)
+        return;
+
+    // The list itself is cheap and updates with every keystroke; the article
+    // for the row it lands on is not, so it waits for a pause in the typing.
+    const bool suppressed = m_suppressSelectionNavigation;
+    m_suppressSelectionNavigation = true;
+    m_wordList->setCurrentIndex(m_wordModel->index(0, 0));
+    m_suppressSelectionNavigation = suppressed;
+
+    if (preview)
+        m_previewTimer->start();
 }
 
 void MainWindow::rememberLookup(const QString &word)
@@ -554,6 +602,8 @@ void MainWindow::rememberLookup(const QString &word)
     while (m_recent.size() > kHistoryLimit)
         m_recent.removeLast();
 
+    m_clearHistoryAction->setEnabled(true);
+
     if (m_showingHistory)
         m_wordModel->setStringList(m_recent);
 }
@@ -563,13 +613,55 @@ void MainWindow::clearHistory()
     m_recent.clear();
     if (m_showingHistory)
         m_wordModel->setStringList(m_recent);
+    m_clearHistoryAction->setEnabled(false);
     m_status->setText(QStringLiteral("History cleared"));
+}
+
+void MainWindow::removeFromHistory(const QString &word)
+{
+    const qsizetype before = m_recent.size();
+    m_recent.removeIf([&word](const QString &entry) {
+        return entry.compare(word, Qt::CaseInsensitive) == 0;
+    });
+    if (m_recent.size() == before)
+        return;
+
+    // Refilling the model drops the current row, which would otherwise be read
+    // as the reader choosing a different word.
+    if (m_showingHistory) {
+        const bool suppressed = m_suppressSelectionNavigation;
+        m_suppressSelectionNavigation = true;
+        m_wordModel->setStringList(m_recent);
+        m_suppressSelectionNavigation = suppressed;
+    }
+
+    m_clearHistoryAction->setEnabled(!m_recent.isEmpty());
+    m_status->setText(QStringLiteral("Removed \"%1\" from history").arg(word));
+}
+
+void MainWindow::showWordListMenu(const QPoint &pos)
+{
+    QMenu menu(this);
+
+    const QModelIndex index = m_wordList->indexAt(pos);
+    const QString word = index.isValid() ? index.data(Qt::DisplayRole).toString() : QString();
+
+    if (!word.isEmpty() && m_recent.contains(word, Qt::CaseInsensitive)) {
+        QAction *forget = menu.addAction(QStringLiteral("&Remove \"%1\" from History").arg(word));
+        connect(forget, &QAction::triggered, this, [this, word]() { removeFromHistory(word); });
+        menu.addSeparator();
+    }
+
+    menu.addAction(m_clearHistoryAction);
+    menu.exec(m_wordList->viewport()->mapToGlobal(pos));
 }
 
 void MainWindow::showCurrentSelection()
 {
     if (m_suppressSelectionNavigation)
         return;
+
+    m_previewTimer->stop();
 
     const QModelIndex index = m_wordList->currentIndex();
     if (index.isValid())
@@ -581,6 +673,9 @@ void MainWindow::navigateTo(const QString &word)
     const QString trimmed = word.trimmed();
     if (trimmed.isEmpty())
         return;
+
+    // A deliberate choice supersedes whatever the list was about to preview.
+    m_previewTimer->stop();
 
     if (!m_navigating) {
         if (m_historyPosition >= 0 && m_historyPosition < m_history.size() &&
@@ -693,6 +788,27 @@ void MainWindow::updateHistoryActions()
         m_backAction->setEnabled(m_historyPosition > 0);
     if (m_forwardAction)
         m_forwardAction->setEnabled(m_historyPosition + 1 < m_history.size());
+}
+
+void MainWindow::warmUpRendering()
+{
+    for (Dictionary *dictionary : m_library.dictionaries()) {
+        const int count = dictionary->entryCount();
+        if (!dictionary->isEnabled() || count == 0)
+            continue;
+
+        // Any entry will do: it is read only for the <link> tag naming the
+        // stylesheet. A few are tried because the first headwords of a
+        // dictionary are sometimes front matter with no markup at all.
+        QString sample;
+        for (int slice = 1; slice < 5 && sample.isEmpty(); ++slice) {
+            const QString word = dictionary->headwordAt(int(qint64(count) * slice / 5));
+            if (!word.isEmpty())
+                sample = dictionary->definition(word);
+        }
+
+        m_article->warmUp(dictionary, sample);
+    }
 }
 
 void MainWindow::setStatusSummary()

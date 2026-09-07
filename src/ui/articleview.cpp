@@ -6,6 +6,7 @@
 #include <QImage>
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QFontMetricsF>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QRegularExpression>
@@ -219,6 +220,50 @@ void ArticleView::setNavigationActions(QAction *back, QAction *forward)
     m_forwardAction = forward;
 }
 
+void ArticleView::setClearHistoryAction(QAction *action)
+{
+    m_clearHistoryAction = action;
+}
+
+void ArticleView::warmUp(Dictionary *dictionary, const QString &articleHtml)
+{
+    if (!dictionary || articleHtml.isEmpty())
+        return;
+
+    // Both caches live as long as the dictionary does, and both are otherwise
+    // filled during the first lookup: the stylesheet has to be found inside the
+    // .mdd archive, filtered, and parsed a second time for its layout rules.
+    const QString &styles = usableStyleSheetFor(dictionary, articleHtml);
+    layoutRulesFor(dictionary, articleHtml);
+
+    // Qt resolves a font family the first time a stylesheet applies it, by
+    // asking the platform's font matcher. Dictionaries name fonts they ship
+    // themselves or expect from Windows, so most of these miss and cost a full
+    // search of everything installed -- once, and here rather than mid-lookup.
+    for (const QString &family : cssfilter::fontFamilies(styles)) {
+        QFont probe(family);
+        probe.setPointSizeF(m_fontPointSize);
+        const QFontMetricsF metrics(probe);
+        metrics.height(); // asking for a metric is what performs the match
+    }
+
+    // One trip through the HTML importer, so its own setup is not charged to
+    // the first article the reader asks for.
+    QTextDocument scratch;
+    scratch.setDefaultFont(font());
+    scratch.setDefaultStyleSheet(theme::articleBaseCss(m_fontPointSize));
+    scratch.setHtml(QStringLiteral("<body><p class=\"qmdict-source\">%1</p></body>")
+                        .arg(dictionary->title().toHtmlEscaped()));
+}
+
+void ArticleView::forgetDictionaries()
+{
+    m_usableStyles.clear();
+    m_layoutRules.clear();
+    m_articles.clear();
+    m_word.clear();
+}
+
 void ArticleView::contextMenuEvent(QContextMenuEvent *event)
 {
     QMenu *menu = createStandardContextMenu(event->pos());
@@ -245,6 +290,11 @@ void ArticleView::contextMenuEvent(QContextMenuEvent *event)
         QAction *lookup = menu->addAction(QStringLiteral("Look Up \"%1\"").arg(selection));
         connect(lookup, &QAction::triggered, this,
                 [this, selection]() { emit wordLookupRequested(selection); });
+    }
+
+    if (m_clearHistoryAction) {
+        menu->addSeparator();
+        menu->addAction(m_clearHistoryAction);
     }
 
     menu->setAttribute(Qt::WA_DeleteOnClose);

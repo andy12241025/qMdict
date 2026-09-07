@@ -40,6 +40,10 @@ public:
     // Headwords starting with `prefix`, in sorted order.
     QStringList completions(const QString &prefix, int limit) const;
 
+    // The headword at `sortedPosition`, so a sample article can be fetched
+    // without knowing what the dictionary contains.
+    QString headwordAt(int sortedPosition) const;
+
     bool contains(const QString &word) const;
 
     // Definition HTML for `word`, following @@@LINK redirects and applying the

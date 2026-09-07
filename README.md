@@ -22,7 +22,10 @@ few tens of megabytes of RAM rather than a gigabyte.
   setting is remembered. Double-clicking any word in an article looks it up.
 - **Stays out of the way.** Closing the window hides it to the system tray so the index stays
   warm and the next lookup is instant; turn that off under **File → Close to System Tray**.
-  Emptying the search box brings back your recent lookups, remembered between sessions.
+  Reopening it clears the search box, so the next word can just be typed.
+- **Recent lookups, remembered between sessions.** Emptying the search box brings them back.
+  The list keeps its order while you click through it, and right-clicking removes a single
+  word or clears the lot.
 - **Low memory and fast startup.** Only the headword index lives in RAM; articles are inflated
   on demand into a small LRU cache. The index is cached on disk after the first open, so
   subsequent launches are effectively instant.
@@ -69,6 +72,7 @@ Dict/
 | --- | --- |
 | Search | Type in the box; results update as you type |
 | See what you looked up before | Clear the search box; the list shows recent lookups |
+| Forget one word, or all of them | Right-click it in the list, or right-click the article |
 | Move through results | Up/Down arrows work while the cursor stays in the search box |
 | Look up a word you are reading | Double-click it in an article |
 | Follow a cross-reference | Click any link in an article |
@@ -116,7 +120,7 @@ are vendored in `third_party/` (see below), so there is nothing else to install.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
 cmake --build build -j$(nproc)
-./build/qmdict_tests    # 91 checks over generated MDX/MDD fixtures
+./build/qmdict_tests    # 221 checks over generated MDX/MDD fixtures
 ./build/qMdict
 ```
 
@@ -225,6 +229,15 @@ these stylesheets are written for a browser, so most of what they contain — fo
 generated content, floats — cannot affect the result. Rules Qt cannot act on, and rules whose
 target does not occur in the entry being shown, are removed before rendering. On a long Oxford
 entry that is the difference between a snappy lookup and a visible pause.
+
+Margins and padding are a case of their own, and by far the most expensive one. Qt applies them
+only to the elements it lays out as blocks, but it resolves them on every element a rule
+matches, and dictionary stylesheets put them on the custom inline elements that make up the bulk
+of an entry. Dropping the ones Qt is going to discard leaves the page identical to the pixel and
+takes the Oxford entry for *take* from 1.2 seconds to 0.15. Measuring said the same thing about
+fonts: a family a stylesheet names has to be found before it can be used, and the search goes
+out to the system's font matcher, so every family each dictionary asks for is resolved once at
+startup instead.
 
 Finally, dictionaries assume a white page, so in dark mode their colours are remapped: text is
 raised to a readable lightness with its hue intact, and panels meant to be pale are darkened.

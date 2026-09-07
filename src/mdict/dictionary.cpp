@@ -102,6 +102,17 @@ QStringList Dictionary::completions(const QString &prefix, int limit) const
     return result;
 }
 
+QString Dictionary::headwordAt(int sortedPosition) const
+{
+    if (!m_mdx)
+        return QString();
+
+    const int index = m_mdx->entryAtSortedPosition(sortedPosition);
+    if (index < 0)
+        return QString();
+    return QString::fromUtf8(m_mdx->keyAt(index));
+}
+
 bool Dictionary::contains(const QString &word) const
 {
     return m_mdx && !m_mdx->findExact(word.toUtf8()).isEmpty();

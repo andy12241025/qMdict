@@ -45,6 +45,19 @@ public:
     // when the menu bar is hidden.
     void setNavigationActions(QAction *back, QAction *forward);
 
+    // Offered at the bottom of the context menu, next to where the recent list
+    // is read.
+    void setClearHistoryAction(QAction *action);
+
+    // Builds everything a dictionary's first article would otherwise build on
+    // the spot: its filtered stylesheet, its layout rules, and the fonts that
+    // stylesheet asks the platform for.
+    void warmUp(Dictionary *dictionary, const QString &articleHtml);
+
+    // Drops every reference to the open dictionaries, which the caches and the
+    // article on screen both hold. Must be called before they are destroyed.
+    void forgetDictionaries();
+
 signals:
     void wordActivated(const QString &word);
 
@@ -78,6 +91,7 @@ private:
     qreal m_fontPointSize = kDefaultFontPointSize;
     QAction *m_backAction = nullptr;
     QAction *m_forwardAction = nullptr;
+    QAction *m_clearHistoryAction = nullptr;
     QHash<Dictionary *, htmlblocks::LayoutRules> m_layoutRules;
     QHash<Dictionary *, QString> m_usableStyles;
 };

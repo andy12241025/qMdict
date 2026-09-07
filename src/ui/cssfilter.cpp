@@ -73,10 +73,80 @@ const QSet<QString> &usableProperties()
     return properties;
 }
 
+// Margins and padding, which Qt honours only on an element it lays out as a
+// block. Everywhere else it parses the value, converts it, and throws it away.
+const QSet<QString> &boxProperties()
+{
+    static const QSet<QString> properties = {
+        QStringLiteral("margin"),       QStringLiteral("margin-top"),
+        QStringLiteral("margin-bottom"), QStringLiteral("margin-left"),
+        QStringLiteral("margin-right"), QStringLiteral("padding"),
+        QStringLiteral("padding-top"),  QStringLiteral("padding-bottom"),
+        QStringLiteral("padding-left"), QStringLiteral("padding-right"),
+    };
+    return properties;
+}
+
+// The elements Qt's rich text engine gives a block of their own. A dictionary's
+// custom elements are not among them, however the stylesheet declares them:
+// Qt decides layout from the element name alone.
+const QSet<QString> &blockElements()
+{
+    static const QSet<QString> known = {
+        QStringLiteral("address"), QStringLiteral("blockquote"), QStringLiteral("body"),
+        QStringLiteral("caption"), QStringLiteral("center"),     QStringLiteral("dd"),
+        QStringLiteral("div"),     QStringLiteral("dl"),         QStringLiteral("dt"),
+        QStringLiteral("form"),    QStringLiteral("h1"),         QStringLiteral("h2"),
+        QStringLiteral("h3"),      QStringLiteral("h4"),         QStringLiteral("h5"),
+        QStringLiteral("h6"),      QStringLiteral("hr"),         QStringLiteral("html"),
+        QStringLiteral("li"),      QStringLiteral("ol"),         QStringLiteral("p"),
+        QStringLiteral("pre"),     QStringLiteral("table"),      QStringLiteral("tbody"),
+        QStringLiteral("td"),      QStringLiteral("tfoot"),      QStringLiteral("th"),
+        QStringLiteral("thead"),   QStringLiteral("tr"),         QStringLiteral("ul"),
+    };
+    return known;
+}
+
 const QRegularExpression &ruleExpression()
 {
     static const QRegularExpression expression(QStringLiteral("([^{}]+)\\{([^{}]*)\\}"));
     return expression;
+}
+
+// Whether `selector` can land on an element Qt lays out as a block, and so
+// whether its margins and padding are worth carrying. Anything uncertain --
+// a class on its own, an unrecognised construct -- counts as yes.
+bool canSelectABlock(const QString &selector)
+{
+    static const QRegularExpression elementToken(QStringLiteral("^([a-zA-Z][-_a-zA-Z0-9]*)"));
+    static const QRegularExpression combinator(QStringLiteral("[\\s>+~]"));
+    static const QString marker = QStringLiteral("\x01");
+
+    for (const QString &alternative : selector.split(QLatin1Char(','))) {
+        // Only the rightmost compound decides what the rule lands on; an
+        // ancestor cannot turn an inline element into a block.
+        QString compound = alternative.trimmed().section(combinator, -1);
+
+        // An escaped colon is part of a namespaced element name rather than a
+        // pseudo-class, and Qt knows such an element by its local name, so
+        // xhtml\:table is a table.
+        compound.replace(QLatin1String("\\:"), marker);
+        const int pseudo = compound.indexOf(QLatin1Char(':'));
+        if (pseudo >= 0)
+            compound.truncate(pseudo);
+        const int bracket = compound.indexOf(QLatin1Char('['));
+        if (bracket >= 0)
+            compound.truncate(bracket);
+        const int prefix = compound.lastIndexOf(marker);
+        if (prefix >= 0)
+            compound = compound.mid(prefix + marker.size());
+
+        // A rule selecting on a class alone can land on anything, so it counts.
+        const QRegularExpressionMatch element = elementToken.match(compound);
+        if (!element.hasMatch() || blockElements().contains(element.captured(1).toLower()))
+            return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -109,13 +179,23 @@ QString usable(const QString &css)
             selector.contains(QLatin1String(":after")))
             continue;
 
+        // Box properties on an element Qt lays out inline are the single most
+        // expensive thing a dictionary stylesheet can contain: Qt resolves them
+        // for every element it matches and then discards the result, which is
+        // most of the second a long Oxford entry takes to appear.
+        const bool keepBox = canSelectABlock(selector);
+
         QStringList keep;
         for (const QString &declaration : match.captured(2).split(QLatin1Char(';'))) {
             const int colon = declaration.indexOf(QLatin1Char(':'));
             if (colon < 0)
                 continue;
-            if (usableProperties().contains(declaration.left(colon).trimmed().toLower()))
-                keep.append(declaration.trimmed());
+            const QString property = declaration.left(colon).trimmed().toLower();
+            if (!usableProperties().contains(property))
+                continue;
+            if (!keepBox && boxProperties().contains(property))
+                continue;
+            keep.append(declaration.trimmed());
         }
 
         if (keep.isEmpty())
@@ -125,6 +205,46 @@ QString usable(const QString &css)
     }
 
     return out;
+}
+
+QStringList fontFamilies(const QString &css)
+{
+    static const QRegularExpression declaration(
+        QStringLiteral("\\bfont(?:-family)?\\s*:([^;}]*)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression measurement(QStringLiteral("[0-9/]"));
+
+    QStringList families;
+    QSet<QString> seen;
+
+    auto it = declaration.globalMatch(css);
+    while (it.hasNext()) {
+        QString value = it.next().captured(1);
+        value.remove(QLatin1Char('"'));
+        value.remove(QLatin1Char('\''));
+        const int important = value.indexOf(QLatin1Char('!'));
+        if (important >= 0)
+            value.truncate(important);
+
+        for (const QString &candidate : value.split(QLatin1Char(','))) {
+            // The `font` shorthand puts style, weight and size in front of the
+            // family list, so nothing up to the last measurement is a name.
+            QStringList words = candidate.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            for (int i = words.size() - 1; i >= 0; --i) {
+                if (words.at(i).contains(measurement)) {
+                    words = words.mid(i + 1);
+                    break;
+                }
+            }
+
+            const QString family = words.join(QLatin1Char(' '));
+            if (family.isEmpty() || seen.contains(family))
+                continue;
+            seen.insert(family);
+            families.append(family);
+        }
+    }
+    return families;
 }
 
 QString relevantTo(const QString &css, const QString &html)

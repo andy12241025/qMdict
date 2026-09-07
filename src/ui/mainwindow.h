@@ -41,6 +41,7 @@ private slots:
     void reloadLibrary();
     void updateSuggestions();
     void clearHistory();
+    void showWordListMenu(const QPoint &pos);
     void showCurrentSelection();
     void navigateTo(const QString &word);
     void goBack();
@@ -66,6 +67,13 @@ private:
     // through results does not count, or typing would flood the list.
     void rememberLookup(const QString &word);
 
+    void removeFromHistory(const QString &word);
+
+    // Does the work a dictionary's first article would otherwise do while the
+    // reader waits: finding and filtering its stylesheet, and resolving the
+    // fonts that stylesheet names.
+    void warmUpRendering();
+
     // Applies `points` to the article and scales the result list to match.
     void applyFontPointSize(qreal points);
 
@@ -89,8 +97,14 @@ private:
     QLabel *m_memory = nullptr;
     QTimer *m_searchTimer = nullptr;
 
+    // Refilling the result list selects its first row, and showing that row's
+    // article costs far more than the keystroke that caused it. Held back until
+    // typing pauses, so a word costs one article rather than one per letter.
+    QTimer *m_previewTimer = nullptr;
+
     QAction *m_backAction = nullptr;
     QAction *m_forwardAction = nullptr;
+    QAction *m_clearHistoryAction = nullptr;
     QAction *m_dictionaryStylesAction = nullptr;
     QAction *m_menuBarAction = nullptr;
     QAction *m_closeToTrayAction = nullptr;

@@ -19,6 +19,14 @@ if [[ -z "$qt_prefix" ]]; then
     exit 1
 fi
 
+# ldd reports absolute paths, and the libraries to bundle are picked out by
+# matching them against this prefix. A relative one matches nothing, and the
+# result is a zip that looks right and has no Qt in it.
+qt_prefix="$(cd "$qt_prefix" 2>/dev/null && pwd)" || {
+    echo "error: no such Qt prefix: ${1:-$QT_PREFIX}" >&2
+    exit 1
+}
+
 echo ">> configuring"
 cmake -S "$here" -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -86,6 +94,11 @@ collect_libs "$stage/bin/qMdict"
 while read -r plugin; do
     collect_libs "$plugin"
 done < <(find "$stage/plugins" -name '*.so')
+
+if [[ ! -e "$stage/lib/libQt6Core.so.6" ]]; then
+    echo "error: no Qt libraries were collected from $qt_prefix" >&2
+    exit 1
+fi
 
 strip --strip-unneeded "$stage"/lib/*.so* 2>/dev/null || true
 
