@@ -130,11 +130,14 @@ On Debian/Ubuntu the system Qt works too:
 sudo apt install qt6-base-dev cmake ninja-build
 ```
 
-### Producing the release zips
+### Producing the releases
 
 ```bash
-# Linux, on Linux
+# Linux zip, on Linux. The Qt prefix must be an absolute path.
 packaging/package-linux.sh /path/to/Qt/6.8.3/gcc_64
+
+# Debian package, on the release it is meant for
+packaging/package-deb.sh
 
 # Windows, on Windows (MSVC)
 packaging\package-windows.ps1 -QtPrefix C:\Qt\6.8.3\msvc2022_64
@@ -145,13 +148,16 @@ packaging/package-windows-cross.sh \
     --qt-host    /path/to/Qt/6.8.3/gcc_64
 ```
 
-Each script builds, bundles the Qt runtime, and zips the result. The native scripts also run
-the test suite; the cross script instead walks the import tables of every bundled binary and
-fails if any DLL is neither included nor supplied by Windows, since it cannot execute the
-result on the build machine.
+The zip scripts bundle the Qt runtime; the native ones also run the test suite, while the cross
+script instead walks the import tables of every bundled binary and fails if any DLL is neither
+included nor supplied by Windows, since it cannot execute the result on the build machine.
 
-`.github/workflows/build.yml` builds both platforms natively on every push — including running
-the tests on Windows — and attaches the zips to tagged releases.
+The `.deb` is the exception: it links the distribution's own Qt rather than bundling one, so it
+has to be built on the release it targets. Ubuntu 24.04 renamed the Qt runtime packages to
+`libqt6core6t64` and friends, and a package built against 22.04 will not install there.
+
+`.github/workflows/build.yml` builds all three natively on every push — including running the
+tests on Windows — and attaches them to tagged releases.
 
 ## How it works
 

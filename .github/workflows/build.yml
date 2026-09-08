@@ -34,6 +34,28 @@ jobs:
           name: qMdict-linux-x86_64
           path: dist/*.zip
 
+  # Built on 24.04 rather than alongside the zip on 22.04: the package links the
+  # distribution's Qt instead of bundling one, and 24.04 renamed those packages
+  # to libqt6core6t64 and friends, so one built on 22.04 will not install there.
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build qt6-base-dev
+
+      - name: Build and package
+        run: packaging/package-deb.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qMdict-linux-deb
+          path: dist/*.deb
+
   windows:
     runs-on: windows-2022
     steps:
@@ -57,7 +79,7 @@ jobs:
           path: dist/*.zip
 
   release:
-    needs: [linux, windows]
+    needs: [linux, deb, windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -69,5 +91,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.deb
           generate_release_notes: true
