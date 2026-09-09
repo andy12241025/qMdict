@@ -1,6 +1,5 @@
 #include "mainwindow.h"
 
-#include "../net/wiktionary.h"
 #include "articleview.h"
 
 #include <QActionGroup>
@@ -330,7 +329,7 @@ void MainWindow::buildActions()
     m_onlineLookupAction->setStatusTip(
         QStringLiteral("Ask %1 about words no dictionary here has. This sends the word over "
                        "the internet.")
-            .arg(wiktionary::sourceName()));
+            .arg(OnlineLookup::sourceNames().join(QStringLiteral(" and "))));
     connect(m_onlineLookupAction, &QAction::toggled, this, [this](bool on) {
         if (!on)
             m_online.cancel();
@@ -721,11 +720,10 @@ void MainWindow::display(const QString &word)
     m_online.cancel();
 
     if (matches.isEmpty() && m_onlineLookupAction->isChecked()) {
+        const QString sources = OnlineLookup::sourceNames().join(QStringLiteral(", then "));
         m_article->showMessage(
-            word, QStringLiteral("No dictionary here has this word. Asking %1...")
-                      .arg(wiktionary::sourceName()));
-        m_status->setText(QStringLiteral("Looking up \"%1\" on %2...")
-                              .arg(word, wiktionary::sourceName()));
+            word, QStringLiteral("No dictionary here has this word. Asking %1...").arg(sources));
+        m_status->setText(QStringLiteral("Looking up \"%1\" online...").arg(word));
         m_online.lookUp(word);
         return;
     }
@@ -753,13 +751,13 @@ QString MainWindow::currentWord() const
     return m_history.at(m_historyPosition);
 }
 
-void MainWindow::showOnlineArticle(const QString &word, const QString &html)
+void MainWindow::showOnlineArticle(const QString &word, const QString &source, const QString &html)
 {
     if (word != currentWord())
         return;
 
-    m_article->showArticles(word, {{nullptr, wiktionary::sourceName(), html}});
-    m_status->setText(QStringLiteral("\"%1\" - %2").arg(word, wiktionary::sourceName()));
+    m_article->showArticles(word, {{nullptr, source, html}});
+    m_status->setText(QStringLiteral("\"%1\" - %2").arg(word, source));
 }
 
 void MainWindow::showOnlineFailure(const QString &word, const QString &reason)
@@ -767,9 +765,9 @@ void MainWindow::showOnlineFailure(const QString &word, const QString &reason)
     if (word != currentWord())
         return;
 
-    m_article->showMessage(word, QStringLiteral("No dictionary here has this word, and %1 "
-                                                "returned nothing for it.")
-                                     .arg(wiktionary::sourceName()));
+    m_article->showMessage(
+        word, QStringLiteral("No dictionary here has this word, and neither did %1.")
+                  .arg(OnlineLookup::sourceNames().join(QStringLiteral(" or "))));
     m_status->setText(reason.isEmpty()
                           ? QStringLiteral("\"%1\" not found").arg(word)
                           : QStringLiteral("\"%1\" not found - %2").arg(word, reason));

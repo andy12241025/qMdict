@@ -74,7 +74,7 @@ private:
     // reader has moved on can be dropped.
     QString currentWord() const;
 
-    void showOnlineArticle(const QString &word, const QString &html);
+    void showOnlineArticle(const QString &word, const QString &source, const QString &html);
     void showOnlineFailure(const QString &word, const QString &reason);
 
     // Does the work a dictionary's first article would otherwise do while the

@@ -50,6 +50,7 @@ add_library(qmdict_core STATIC
     src/mdict/dictionary.cpp
     src/mdict/library.cpp
     src/net/wiktionary.cpp
+    src/net/youdao.cpp
     src/audio/oggstream.cpp
     src/audio/audiodecoder.cpp
     src/ui/darkcolours.cpp

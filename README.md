@@ -27,9 +27,10 @@ from a single box. Nothing is installed, nothing leaves the machine unless you a
   The list keeps its order while you click through it, and right-clicking removes a single
   word or clears the lot.
 - **An answer for words your dictionaries lack, if you want one.** **View → Look Up Online When
-  Not Found** falls back to Wiktionary and renders the result in the same pane, with its links
-  wired back into your own dictionaries. Off until you turn it on, because it is the one thing
-  here that sends a word over the internet.
+  Not Found** asks Youdao first, in Chinese, and falls back to Wiktionary for what Youdao has no
+  entry for — which in practice is words that are not English. The result is rendered in the same
+  pane. Off until you turn it on, because it is the one thing here that sends a word over the
+  internet.
 - **Low memory and fast startup.** Only the headword index lives in RAM; articles are inflated
   on demand into a small LRU cache. The index is cached on disk after the first open, so
   subsequent launches are effectively instant.
@@ -87,7 +88,7 @@ Dict/
 | Close to the tray / quit | Closing hides to the system tray; **File → Quit** exits |
 | Hear a pronunciation | Click the speaker link in an article |
 | Enable or disable dictionaries | **View → Dictionaries…** |
-| Look a missing word up online | **View → Look Up Online When Not Found** |
+| Look a missing word up online | **View → Look Up Online When Not Found** (Youdao, then Wiktionary) |
 | Switch theme | **View → Theme** |
 
 If a dictionary's own stylesheet clashes with dark mode, turn off
@@ -125,7 +126,7 @@ are vendored in `third_party/` (see below), so there is nothing else to install.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
 cmake --build build -j$(nproc)
-./build/qmdict_tests    # 239 checks over generated MDX/MDD fixtures
+./build/qmdict_tests    # 253 checks over generated MDX/MDD fixtures
 ./build/qMdict
 ```
 
@@ -170,7 +171,7 @@ tests on Windows — and attaches them to tagged releases.
 src/util/       ripemd128, lzo1x, block codec, legacy text decoding
 src/mdict/      mdictfile (container parsing + index), dictionary (mdx+mdd), library (folder scan)
 src/audio/      ogg demuxer, speex/mp3/wav decoding, playback
-src/net/        wiktionary (reply to article, no networking) and the request that fetches it
+src/net/        youdao and wiktionary (reply to article, no networking), and the request that fetches it
 src/ui/         mainwindow, articleview, theme, dark-mode colours, block layout and css filtering
 third_party/    speex (decoder only) and minimp3
 resources/      generated icon set and the Windows .ico
@@ -203,27 +204,40 @@ AddressSanitizer and UndefinedBehaviorSanitizer.
 ### Looking a word up online
 
 With **View → Look Up Online When Not Found** switched on, a word that no enabled dictionary
-contains is sent to Wiktionary's definition endpoint and the reply is rendered in the article
-pane like any other entry. Nothing else is ever sent, the setting is off until you turn it on,
-and typing does not trigger it: only a word you actually asked for, by pressing Enter or
-following a link, and only after every local dictionary has come up empty.
+contains is looked up online and the reply is rendered in the article pane like any other entry,
+named after whichever source answered. Nothing else is ever sent, the setting is off until you
+turn it on, and typing does not trigger it: only a word you actually asked for, by pressing
+Enter or following a link, and only after every local dictionary has come up empty.
 
-Wiktionary defines terms from every language in English, so one endpoint covers all of them.
-The reply arrives grouped by language, English first, and the wiki's own links are rewritten
-into ordinary lookups so following one searches your dictionaries rather than opening a
-browser. Links into the wiki's namespaces — glossaries, appendices, categories — are not
-words, and are reduced to plain text.
+Youdao is asked first. It defines English words in Chinese, as most of the dictionaries this is
+built for do, and the entry it returns carries both pronunciations, the sense list, the Collins
+gloss with bilingual examples, common phrases and a few example sentences. Wiktionary is asked
+second, and covers what Youdao has no entry for — in practice that means words which are not
+English, since Youdao's English vocabulary is close to complete.
 
-Each part of speech arrives with a summary sense whose nested list repeats the senses that
-follow it individually, so the nested copy is dropped; what is left reads as one numbered list.
-Answers are remembered for as long as the window is open, including the misses, so going back
-and forth over the same word asks once.
+A source that cannot be reached is not allowed to end the search: the next one is tried, and
+only an empty answer from all of them counts as a miss. That distinction is also what the status
+bar reports, so a blocked network does not read as an unknown word. Answers are remembered for
+as long as the window is open, misses included, so going back and forth over the same word asks
+once.
 
-Turning a reply into an article is kept apart from fetching one, in `src/net/wiktionary.cpp`,
-which touches no network at all and is checked against saved payloads by the test suite.
+Each has a quirk worth knowing about. Wiktionary opens every part of speech with a summary sense
+whose nested list repeats the senses that follow it individually, so the nested copy is dropped
+and what is left reads as one numbered list; its wiki links are rewritten into ordinary lookups,
+so following one searches your dictionaries rather than opening a browser, while links into the
+wiki's own namespaces are not words and are reduced to plain text. Youdao writes its register
+labels in angle brackets — `<俚>` for slang, `<美>` for American usage — which a rich text engine
+would swallow as unknown markup, so only tags whose name begins with an ASCII letter are treated
+as markup and the rest of the text is escaped on its way into the article.
 
-Wiktionary's text is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
-and the article names it as the source.
+Turning a reply into an article is kept apart from fetching one, in `src/net/youdao.cpp` and
+`src/net/wiktionary.cpp`, which touch no network at all and are checked against saved payloads
+by the test suite.
+
+Wiktionary's text is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+Youdao's is not licensed for reuse; it is read through the same public endpoint a browser uses,
+shown as it was returned, and stored no further than the window it appears in. Both articles
+name their source.
 
 ### Dictionary styling
 

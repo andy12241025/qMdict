@@ -9,6 +9,7 @@
 #include "../src/mdict/library.h"
 #include "../src/mdict/mdictfile.h"
 #include "../src/net/wiktionary.h"
+#include "../src/net/youdao.h"
 #include "../src/ui/darkcolours.h"
 #include "../src/ui/cssfilter.h"
 #include "../src/ui/htmlblocks.h"
@@ -1214,6 +1215,67 @@ void testWiktionary()
           "a link into the wiki's own namespaces is reduced to its text");
 }
 
+void testYoudao()
+{
+    using namespace qmdict::youdao;
+
+    check(definitionUrl(QStringLiteral("run")).toEncoded().endsWith(QByteArrayLiteral("jsonapi?q=run")),
+          "the endpoint is built from the word");
+
+    QString error;
+    check(articleFrom(QByteArrayLiteral("not json"), &error).isEmpty() && !error.isEmpty(),
+          "a reply that is not json is refused");
+
+    // Youdao answers for a word it has no entry for too, with web guesses and
+    // example sentences but no dictionary of its own.
+    check(articleFrom(QByteArrayLiteral("{\"web_trans\":{},\"input\":\"x\"}"), &error).isEmpty(),
+          "a reply carrying no entry is a miss, not an article");
+
+    const QByteArray payload = QByteArrayLiteral(R"({
+      "ec": {"word": [{
+        "ukphone": "h@'lau", "usphone": "h@'lou",
+        "trs": [
+          {"tr": [{"l": {"i": ["int. \u5582\uff1b<\u4fda>\u55e8"]}}]},
+          {"tr": [{"l": {"i": "n. \u62db\u547c"}}]}
+        ]}]},
+      "collins": {"collins_entries": [{"entries": {"entry": [{"tran_entry": [
+        {"tran": "You say \"<b>Hello</b>\" to someone. \u4f60\u597d",
+         "pos_entry": {"pos": "CONVENTION", "pos_tips": "\u4e60\u60ef\u8868\u8fbe"},
+         "exam_sents": {"sent": [{"eng_sent": "Hello, Trish.", "chn_sent": "\u4f60\u597d\uff0c\u7279\u91cc\u65af\u3002"}]}}
+      ]}]}}]},
+      "phrs": {"phrs": [{"phr": {"headword": {"l": {"i": "say hello"}},
+                                 "trs": [{"tr": {"l": {"i": "\u6253\u62db\u547c"}}}]}}]},
+      "blng_sents_part": {"sentence-pair": [
+        {"sentence": "Hello, this is John.", "sentence-translation": "\u4f60\u597d\uff0c\u6211\u662f\u7ea6\u7ff0\u3002"}]}
+    })");
+
+    const QString article = articleFrom(payload, &error);
+    check(!article.isEmpty(), "an entry payload yields an article");
+
+    check(article.contains(QLatin1String("UK /h@'lau/")) &&
+              article.contains(QLatin1String("US /h@'lou/")),
+          "both pronunciations are shown");
+    check(article.contains(QString::fromUtf8("<h3>\xe9\x87\x8a\xe4\xb9\x89</h3>")),
+          "the senses are given a heading");
+    check(article.contains(QString::fromUtf8("n. \xe6\x8b\x9b\xe5\x91\xbc")),
+          "a sense wrapped as a bare string is read as well as a list");
+
+    // Youdao writes register labels in angle brackets. They are text, and Qt
+    // would otherwise swallow them as unknown markup.
+    check(article.contains(QLatin1String("&lt;")) &&
+              article.contains(QString::fromUtf8("\xe4\xbf\x9a")),
+          "an angle-bracket register label survives, escaped");
+    check(!article.contains(QLatin1String("<b>Hello</b>")), "real markup is stripped out");
+    check(article.contains(QLatin1String("&quot;Hello&quot;")), "its text is kept and escaped");
+
+    check(article.contains(QString::fromUtf8("[\xe4\xb9\xa0\xe6\x83\xaf\xe8\xa1\xa8\xe8\xbe\xbe]")),
+          "the Collins part of speech is shown");
+    check(article.contains(QLatin1String("<i>Hello, Trish.</i>")),
+          "a Collins example is shown");
+    check(article.contains(QLatin1String("say hello")), "phrases are shown");
+    check(article.contains(QLatin1String("Hello, this is John.")), "example sentences are shown");
+}
+
 // --- dark mode colours ----------------------------------------------------
 
 void testDarkColours()
@@ -1306,6 +1368,7 @@ int main(int argc, char *argv[])
     testHtmlBlocks();
     testCssFilter();
     testWiktionary();
+    testYoudao();
     testDarkColours();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
