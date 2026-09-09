@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 
+#include "../net/wiktionary.h"
 #include "articleview.h"
 
 #include <QActionGroup>
@@ -200,6 +201,8 @@ void MainWindow::buildUi()
         navigateTo(word);
     });
     connect(m_article, &ArticleView::externalLinkActivated, this, &MainWindow::openExternal);
+    connect(&m_online, &OnlineLookup::finished, this, &MainWindow::showOnlineArticle);
+    connect(&m_online, &OnlineLookup::failed, this, &MainWindow::showOnlineFailure);
     connect(m_article, &ArticleView::wordLookupRequested, this, [this](const QString &word) {
         // Ignore double-clicks on words no dictionary has, so a stray click
         // cannot replace the article with a "not found" page.
@@ -321,6 +324,19 @@ void MainWindow::buildActions()
             [this](bool on) { m_article->setUseDictionaryStyles(on); });
     viewMenu->addAction(m_dictionaryStylesAction);
 
+    m_onlineLookupAction =
+        new QAction(QStringLiteral("Look Up &Online When Not Found"), this);
+    m_onlineLookupAction->setCheckable(true);
+    m_onlineLookupAction->setStatusTip(
+        QStringLiteral("Ask %1 about words no dictionary here has. This sends the word over "
+                       "the internet.")
+            .arg(wiktionary::sourceName()));
+    connect(m_onlineLookupAction, &QAction::toggled, this, [this](bool on) {
+        if (!on)
+            m_online.cancel();
+    });
+    viewMenu->addAction(m_onlineLookupAction);
+
     m_menuBarAction = new QAction(QStringLiteral("Show &Menu Bar"), this);
     m_menuBarAction->setCheckable(true);
     m_menuBarAction->setChecked(true);
@@ -383,6 +399,10 @@ void MainWindow::restoreSettings()
     m_dictionaryStylesAction->setChecked(dictionaryStyles);
     m_article->setUseDictionaryStyles(dictionaryStyles);
 
+    // Off unless asked for: it is the only thing here that leaves the machine.
+    m_onlineLookupAction->setChecked(
+        settings.value(QStringLiteral("ui/onlineLookup"), false).toBool());
+
     applyFontPointSize(settings
                            .value(QStringLiteral("ui/fontPointSize"),
                                   ArticleView::kDefaultFontPointSize)
@@ -422,6 +442,7 @@ void MainWindow::saveSettings()
     settings.setValue(QStringLiteral("library/disabled"), disabled);
     settings.setValue(QStringLiteral("ui/theme"), theme::toString(m_themeMode));
     settings.setValue(QStringLiteral("ui/dictionaryStyles"), m_dictionaryStylesAction->isChecked());
+    settings.setValue(QStringLiteral("ui/onlineLookup"), m_onlineLookupAction->isChecked());
     settings.setValue(QStringLiteral("ui/fontPointSize"), m_article->fontPointSize());
     settings.setValue(QStringLiteral("ui/menuBar"), m_menuBarAction->isChecked());
     settings.setValue(QStringLiteral("ui/closeToTray"), m_closeToTrayAction->isChecked());
@@ -696,10 +717,23 @@ void MainWindow::display(const QString &word)
 {
     const QVector<Library::Match> matches = m_library.lookup(word);
 
-    QVector<QPair<Dictionary *, QString>> articles;
+    // Whatever was being fetched is about to be the wrong word.
+    m_online.cancel();
+
+    if (matches.isEmpty() && m_onlineLookupAction->isChecked()) {
+        m_article->showMessage(
+            word, QStringLiteral("No dictionary here has this word. Asking %1...")
+                      .arg(wiktionary::sourceName()));
+        m_status->setText(QStringLiteral("Looking up \"%1\" on %2...")
+                              .arg(word, wiktionary::sourceName()));
+        m_online.lookUp(word);
+        return;
+    }
+
+    QVector<ArticleView::Article> articles;
     articles.reserve(matches.size());
     for (const Library::Match &match : matches)
-        articles.append({match.dictionary, match.html});
+        articles.append({match.dictionary, QString(), match.html});
 
     m_article->showArticles(word, articles);
 
@@ -710,6 +744,35 @@ void MainWindow::display(const QString &word)
                               .arg(word)
                               .arg(matches.size())
                               .arg(matches.size() == 1 ? QStringLiteral("y") : QStringLiteral("ies")));
+}
+
+QString MainWindow::currentWord() const
+{
+    if (m_historyPosition < 0 || m_historyPosition >= m_history.size())
+        return QString();
+    return m_history.at(m_historyPosition);
+}
+
+void MainWindow::showOnlineArticle(const QString &word, const QString &html)
+{
+    if (word != currentWord())
+        return;
+
+    m_article->showArticles(word, {{nullptr, wiktionary::sourceName(), html}});
+    m_status->setText(QStringLiteral("\"%1\" - %2").arg(word, wiktionary::sourceName()));
+}
+
+void MainWindow::showOnlineFailure(const QString &word, const QString &reason)
+{
+    if (word != currentWord())
+        return;
+
+    m_article->showMessage(word, QStringLiteral("No dictionary here has this word, and %1 "
+                                                "returned nothing for it.")
+                                     .arg(wiktionary::sourceName()));
+    m_status->setText(reason.isEmpty()
+                          ? QStringLiteral("\"%1\" not found").arg(word)
+                          : QStringLiteral("\"%1\" not found - %2").arg(word, reason));
 }
 
 void MainWindow::goBack()

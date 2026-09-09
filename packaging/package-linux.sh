@@ -54,8 +54,11 @@ Plugins = plugins
 Libraries = lib
 EOF
 
-# Only the plugin families a widgets app actually loads.
-for group in platforminputcontexts imageformats iconengines styles; do
+# Only the plugin families a widgets app actually loads. tls is among them
+# because looking a word up online is an https request, and without a backend
+# Qt fails it with no route to the cause. It links the system OpenSSL, which is
+# left unbundled like every other system library.
+for group in platforminputcontexts imageformats iconengines styles tls; do
     if [[ -d "$qt_prefix/plugins/$group" ]]; then
         mkdir -p "$stage/plugins/$group"
         cp -a "$qt_prefix/plugins/$group/." "$stage/plugins/$group/"

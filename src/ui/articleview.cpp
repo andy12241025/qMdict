@@ -106,8 +106,7 @@ void ArticleView::refreshTheme()
     rebuild();
 }
 
-void ArticleView::showArticles(const QString &word,
-                               const QVector<QPair<Dictionary *, QString>> &articles)
+void ArticleView::showArticles(const QString &word, const QVector<Article> &articles)
 {
     m_word = word;
     m_articles = articles;
@@ -131,15 +130,15 @@ QString ArticleView::collectStyles()
         return base;
 
     QString css = base;
-    for (const auto &article : m_articles) {
-        if (!article.first)
+    for (const Article &article : m_articles) {
+        if (!article.dictionary)
             continue;
 
         // Only the rules Qt can act on, and of those only the ones this
         // article can actually match. On a long Oxford entry that removes
         // about a second of selector matching.
-        const QString embedded =
-            cssfilter::relevantTo(usableStyleSheetFor(article.first, article.second), article.second);
+        const QString embedded = cssfilter::relevantTo(
+            usableStyleSheetFor(article.dictionary, article.html), article.html);
         if (!embedded.isEmpty())
             css += QLatin1Char('\n') + theme::adaptStyleSheetForDark(embedded);
     }
@@ -191,16 +190,17 @@ void ArticleView::rebuild()
     QString body;
     body.reserve(4096);
 
-    for (const auto &article : m_articles) {
-        const QString name = article.first ? article.first->title() : QString();
-        body += QStringLiteral("<p class=\"qmdict-source\">%1</p>\n").arg(name.toHtmlEscaped());
+    for (const Article &article : m_articles) {
+        const QString name = article.dictionary ? article.dictionary->title() : article.source;
+        if (!name.isEmpty())
+            body += QStringLiteral("<p class=\"qmdict-source\">%1</p>\n").arg(name.toHtmlEscaped());
 
-        QString html = sanitise(article.second);
-        if (article.first) {
+        QString html = sanitise(article.html);
+        if (article.dictionary) {
             // Namespace prefixes are fixed even with dictionary styling off,
             // since <xhtml:br> is a line break in any theme.
             const htmlblocks::LayoutRules rules =
-                m_useDictionaryStyles ? layoutRulesFor(article.first, article.second)
+                m_useDictionaryStyles ? layoutRulesFor(article.dictionary, article.html)
                                       : htmlblocks::LayoutRules{};
             html = htmlblocks::adaptForTextDocument(html, rules);
         }
@@ -343,10 +343,10 @@ QVariant ArticleView::loadResource(int type, const QUrl &name)
         scheme == QLatin1String("data"))
         return QVariant();
 
-    for (const auto &article : m_articles) {
-        if (!article.first)
+    for (const Article &article : m_articles) {
+        if (!article.dictionary)
             continue;
-        const QByteArray data = article.first->resource(path);
+        const QByteArray data = article.dictionary->resource(path);
         if (data.isEmpty())
             continue;
 

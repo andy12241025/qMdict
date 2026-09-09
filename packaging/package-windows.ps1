@@ -67,13 +67,18 @@ Copy-Item $exe.FullName $stage
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
 # windeployqt is deliberately generous. A dictionary reader never opens a
-# socket, a database or a Direct3D device, so whole plugin families and the
-# libraries behind them are dead weight.
+# database or a Direct3D device, so whole plugin families and the libraries
+# behind them are dead weight. tls and networkinformation stay: looking a word
+# up online is an https request, and Qt fails one with no TLS backend present.
 $before = (Get-ChildItem $stage -Recurse -File | Measure-Object Length -Sum).Sum
-foreach ($group in @("networkinformation", "tls", "sqldrivers", "generic", "iconengines")) {
+foreach ($group in @("sqldrivers", "generic", "iconengines")) {
     $path = Join-Path $stage $group
     if (Test-Path $path) { Remove-Item -Recurse -Force $path }
 }
+
+# Of the TLS backends only Schannel is kept, because it is part of Windows.
+# The OpenSSL one would need libssl and libcrypto shipped beside it.
+Remove-Item -Force (Join-Path $stage "tls\qopensslbackend.dll") -ErrorAction SilentlyContinue
 
 # Anything left that nothing imports goes too. Walking the import tables keeps
 # this honest: a DLL is only removed when no shipped binary references it.

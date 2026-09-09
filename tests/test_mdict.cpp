@@ -8,6 +8,7 @@
 #include "../src/audio/oggstream.h"
 #include "../src/mdict/library.h"
 #include "../src/mdict/mdictfile.h"
+#include "../src/net/wiktionary.h"
 #include "../src/ui/darkcolours.h"
 #include "../src/ui/cssfilter.h"
 #include "../src/ui/htmlblocks.h"
@@ -1142,6 +1143,77 @@ void testCssFilter()
                QByteArrayLiteral("d{color:red}"), "no html means no filtering");
 }
 
+// --- online lookup --------------------------------------------------------
+
+void testWiktionary()
+{
+    using namespace qmdict::wiktionary;
+
+    check(definitionUrl(QStringLiteral("run")).toEncoded().endsWith(QByteArrayLiteral("/definition/run")),
+          "the endpoint is built from the word");
+    check(definitionUrl(QStringLiteral("dead reckoning"))
+              .toEncoded()
+              .endsWith(QByteArrayLiteral("/definition/dead%20reckoning")),
+          "a word with a space is escaped");
+    // A slash would otherwise be read as another step in the path.
+    check(definitionUrl(QStringLiteral("a/b")).toEncoded().endsWith(QByteArrayLiteral("/definition/a%2Fb")),
+          "a word with a slash stays one path segment");
+
+    QString error;
+    check(articleFrom(QByteArrayLiteral("not json"), &error).isEmpty() && !error.isEmpty(),
+          "a reply that is not json is refused");
+    check(articleFrom(QByteArrayLiteral("{\"status\":404,\"detail\":\"nope\"}"), &error).isEmpty(),
+          "an error payload is refused");
+    checkEqual(error.toUtf8(), QByteArrayLiteral("nope"), "the error payload's reason is kept");
+
+    // Shaped like the real thing: keyed by language, and each part of speech
+    // opens with a summary sense whose nested list repeats the senses that
+    // follow it individually.
+    const QByteArray payload = QByteArrayLiteral(R"({
+      "en": [
+        {"partOfSpeech": "Verb", "language": "English", "definitions": [
+          {"definition": "To move swiftly. <ol><li>To move on two feet.</li></ol>"},
+          {"definition": "To move on two feet.",
+           "examples": ["<b>Run</b>, or you will miss it<link rel=\"mw:PageProp/Category\" href=\"./x\">"]},
+          {"definition": "<span class=\"x\"></span>"},
+          {"definition": "To <a rel=\"mw:WikiLink\" href=\"/wiki/go#English\" title=\"go\">go</a> quickly."},
+          {"definition": "See <a href=\"/wiki/Appendix:Glossary\" title=\"g\">the glossary</a>."}
+        ]}
+      ],
+      "nl": [
+        {"partOfSpeech": "Noun", "language": "Dutch", "definitions": [
+          {"definition": "A Dutch sense."}
+        ]}
+      ]
+    })");
+
+    const QString article = articleFrom(payload, &error);
+    check(!article.isEmpty(), "a definitions payload yields an article");
+
+    check(article.contains(QLatin1String("<h3>English</h3>")), "each language gets a heading");
+    check(article.contains(QLatin1String("<h3>Dutch</h3>")), "other languages are kept");
+    check(article.indexOf(QLatin1String("English")) < article.indexOf(QLatin1String("Dutch")),
+          "English is shown first");
+    check(article.contains(QLatin1String("<b>Verb</b>")), "the part of speech is shown");
+
+    check(article.contains(QLatin1String("To move swiftly.")), "a summary sense is kept");
+    check(!article.contains(QLatin1String("<ol><li>To move on two feet")),
+          "the nested list repeating later senses is dropped");
+    check(article.count(QLatin1String("To move on two feet.")) == 1,
+          "the repeated sense appears once");
+    check(!article.contains(QLatin1String("<span class=\"x\"></span></li>")),
+          "a sense with no text is skipped");
+
+    check(article.contains(QLatin1String("<i><b>Run</b>, or you will miss it</i>")),
+          "an example is kept, without its category marker");
+
+    check(article.contains(QLatin1String("href=\"entry://go\"")),
+          "a wiki link becomes a lookup, without its section anchor");
+    check(article.contains(QLatin1String("the glossary")) &&
+              !article.contains(QLatin1String("Appendix:Glossary")),
+          "a link into the wiki's own namespaces is reduced to its text");
+}
+
 // --- dark mode colours ----------------------------------------------------
 
 void testDarkColours()
@@ -1233,6 +1305,7 @@ int main(int argc, char *argv[])
     testSpeexDecoding();
     testHtmlBlocks();
     testCssFilter();
+    testWiktionary();
     testDarkColours();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

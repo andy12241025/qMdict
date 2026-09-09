@@ -3,8 +3,8 @@
 A small, fast, offline reader for MDict dictionaries (`.mdx` / `.mdd`), written in C++ with Qt 6.
 
 Point it at a folder, and every dictionary underneath it — at any depth — becomes searchable
-from a single box. Nothing is uploaded, nothing is installed, and a 1 GB dictionary costs a
-few tens of megabytes of RAM rather than a gigabyte.
+from a single box. Nothing is installed, nothing leaves the machine unless you ask it to, and a
+1 GB dictionary costs a few tens of megabytes of RAM rather than a gigabyte.
 
 ![qMdict showing the same word in two dictionaries](docs/screenshot.png)
 
@@ -26,6 +26,10 @@ few tens of megabytes of RAM rather than a gigabyte.
 - **Recent lookups, remembered between sessions.** Emptying the search box brings them back.
   The list keeps its order while you click through it, and right-clicking removes a single
   word or clears the lot.
+- **An answer for words your dictionaries lack, if you want one.** **View → Look Up Online When
+  Not Found** falls back to Wiktionary and renders the result in the same pane, with its links
+  wired back into your own dictionaries. Off until you turn it on, because it is the one thing
+  here that sends a word over the internet.
 - **Low memory and fast startup.** Only the headword index lives in RAM; articles are inflated
   on demand into a small LRU cache. The index is cached on disk after the first open, so
   subsequent launches are effectively instant.
@@ -83,6 +87,7 @@ Dict/
 | Close to the tray / quit | Closing hides to the system tray; **File → Quit** exits |
 | Hear a pronunciation | Click the speaker link in an article |
 | Enable or disable dictionaries | **View → Dictionaries…** |
+| Look a missing word up online | **View → Look Up Online When Not Found** |
 | Switch theme | **View → Theme** |
 
 If a dictionary's own stylesheet clashes with dark mode, turn off
@@ -113,14 +118,14 @@ dictionaries more faithfully at the cost of roughly 150 MB of RAM and 120 MB of 
 
 ## Building from source
 
-The only external dependency is Qt 6.2 or newer (Core, Gui, Widgets). zlib arrives via Qt; the
+The only external dependency is Qt 6.2 or newer (Core, Gui, Widgets, Network). zlib arrives via Qt; the
 LZO and RIPEMD-128 codecs MDict needs are implemented in `src/util`; and the two audio decoders
 are vendored in `third_party/` (see below), so there is nothing else to install.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/gcc_64
 cmake --build build -j$(nproc)
-./build/qmdict_tests    # 221 checks over generated MDX/MDD fixtures
+./build/qmdict_tests    # 239 checks over generated MDX/MDD fixtures
 ./build/qMdict
 ```
 
@@ -165,6 +170,7 @@ tests on Windows — and attaches them to tagged releases.
 src/util/       ripemd128, lzo1x, block codec, legacy text decoding
 src/mdict/      mdictfile (container parsing + index), dictionary (mdx+mdd), library (folder scan)
 src/audio/      ogg demuxer, speex/mp3/wav decoding, playback
+src/net/        wiktionary (reply to article, no networking) and the request that fetches it
 src/ui/         mainwindow, articleview, theme, dark-mode colours, block layout and css filtering
 third_party/    speex (decoder only) and minimp3
 resources/      generated icon set and the Windows .ico
@@ -193,6 +199,31 @@ The parser is written to be safe against malformed input: every length read from
 validated against the real file size before it is used to allocate, and the reader has been
 fuzzed with tens of thousands of truncated and bit-flipped dictionaries under
 AddressSanitizer and UndefinedBehaviorSanitizer.
+
+### Looking a word up online
+
+With **View → Look Up Online When Not Found** switched on, a word that no enabled dictionary
+contains is sent to Wiktionary's definition endpoint and the reply is rendered in the article
+pane like any other entry. Nothing else is ever sent, the setting is off until you turn it on,
+and typing does not trigger it: only a word you actually asked for, by pressing Enter or
+following a link, and only after every local dictionary has come up empty.
+
+Wiktionary defines terms from every language in English, so one endpoint covers all of them.
+The reply arrives grouped by language, English first, and the wiki's own links are rewritten
+into ordinary lookups so following one searches your dictionaries rather than opening a
+browser. Links into the wiki's namespaces — glossaries, appendices, categories — are not
+words, and are reduced to plain text.
+
+Each part of speech arrives with a summary sense whose nested list repeats the senses that
+follow it individually, so the nested copy is dropped; what is left reads as one numbered list.
+Answers are remembered for as long as the window is open, including the misses, so going back
+and forth over the same word asks once.
+
+Turning a reply into an article is kept apart from fetching one, in `src/net/wiktionary.cpp`,
+which touches no network at all and is checked against saved payloads by the test suite.
+
+Wiktionary's text is licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+and the article names it as the source.
 
 ### Dictionary styling
 

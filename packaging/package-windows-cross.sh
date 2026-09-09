@@ -61,10 +61,15 @@ cp "$build_dir/qMdict.exe" "$stage/"
 
 # Qt finds plugins in <appdir>/<plugin type>/ on Windows, so they go beside
 # the executable rather than under a plugins/ folder.
-mkdir -p "$stage/platforms" "$stage/styles" "$stage/imageformats"
+mkdir -p "$stage/platforms" "$stage/styles" "$stage/imageformats" "$stage/tls"
 cp "$qt_windows/plugins/platforms/qwindows.dll" "$stage/platforms/"
 cp "$qt_windows"/plugins/styles/*.dll "$stage/styles/" 2>/dev/null || true
 cp "$qt_windows"/plugins/imageformats/*.dll "$stage/imageformats/" 2>/dev/null || true
+
+# Looking a word up online is an https request, and Qt cannot make one without
+# a TLS backend. Only Schannel is taken: it is part of Windows, where the
+# OpenSSL backend would need two more DLLs shipped alongside it.
+cp "$qt_windows/plugins/tls/qschannelbackend.dll" "$stage/tls/" 2>/dev/null || true
 
 # Walk the import tables and copy every non-system DLL we can find, which is
 # the cross-compiling equivalent of what windeployqt does.

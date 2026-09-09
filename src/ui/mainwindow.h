@@ -2,6 +2,7 @@
 
 #include "../audio/audioplayer.h"
 #include "../mdict/library.h"
+#include "../net/onlinelookup.h"
 #include "theme.h"
 
 #include <QMainWindow>
@@ -69,6 +70,13 @@ private:
 
     void removeFromHistory(const QString &word);
 
+    // The word the article pane is showing, so a reply that arrives after the
+    // reader has moved on can be dropped.
+    QString currentWord() const;
+
+    void showOnlineArticle(const QString &word, const QString &html);
+    void showOnlineFailure(const QString &word, const QString &reason);
+
     // Does the work a dictionary's first article would otherwise do while the
     // reader waits: finding and filtering its stylesheet, and resolving the
     // fonts that stylesheet names.
@@ -87,6 +95,7 @@ private:
 
     Library m_library;
     AudioPlayer m_audio;
+    OnlineLookup m_online;
 
     QSplitter *m_splitter = nullptr;
     QLineEdit *m_search = nullptr;
@@ -106,6 +115,7 @@ private:
     QAction *m_forwardAction = nullptr;
     QAction *m_clearHistoryAction = nullptr;
     QAction *m_dictionaryStylesAction = nullptr;
+    QAction *m_onlineLookupAction = nullptr;
     QAction *m_menuBarAction = nullptr;
     QAction *m_closeToTrayAction = nullptr;
     QVector<QAction *> m_themeActions;

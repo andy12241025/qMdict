@@ -24,8 +24,18 @@ class ArticleView : public QTextBrowser
 public:
     explicit ArticleView(QWidget *parent = nullptr);
 
-    // Renders `word` using the supplied per-dictionary HTML fragments.
-    void showArticles(const QString &word, const QVector<QPair<Dictionary *, QString>> &articles);
+    // One rendered source. `dictionary` is null for an article that came from
+    // somewhere else, which brings no stylesheet and no resources of its own,
+    // and is named by `source` instead.
+    struct Article
+    {
+        Dictionary *dictionary = nullptr;
+        QString source;
+        QString html;
+    };
+
+    // Renders `word` from the supplied sources, in the order given.
+    void showArticles(const QString &word, const QVector<Article> &articles);
     void showMessage(const QString &title, const QString &body);
 
     void setUseDictionaryStyles(bool enabled);
@@ -86,7 +96,7 @@ private:
     const htmlblocks::LayoutRules &layoutRulesFor(Dictionary *dictionary, const QString &articleHtml);
 
     QString m_word;
-    QVector<QPair<Dictionary *, QString>> m_articles;
+    QVector<Article> m_articles;
     bool m_useDictionaryStyles = true;
     qreal m_fontPointSize = kDefaultFontPointSize;
     QAction *m_backAction = nullptr;

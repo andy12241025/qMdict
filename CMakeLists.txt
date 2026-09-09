@@ -18,7 +18,8 @@ option(QMDICT_BUILD_ICON_TOOL "Build the icon generator (only needed to regenera
 
 # Qt is the only dependency: zlib comes in through Qt's qUncompress, and the
 # LZO and RIPEMD-128 codecs MDict needs are implemented in src/util.
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets)
+# Network is used by one optional feature, looking a missing word up online.
+find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 qt_standard_project_setup()
 
@@ -48,6 +49,7 @@ add_library(qmdict_core STATIC
     src/mdict/mdictfile.cpp
     src/mdict/dictionary.cpp
     src/mdict/library.cpp
+    src/net/wiktionary.cpp
     src/audio/oggstream.cpp
     src/audio/audiodecoder.cpp
     src/ui/darkcolours.cpp
@@ -75,9 +77,12 @@ qt_add_executable(qMdict
     src/ui/articleview.cpp
     src/ui/theme.cpp
     src/audio/audioplayer.cpp
+    src/net/onlinelookup.cpp
 )
 
-target_link_libraries(qMdict PRIVATE qmdict_core Qt6::Widgets)
+# Only the executable talks to the network; turning a reply into an article is
+# in the library above, where it can be tested without one.
+target_link_libraries(qMdict PRIVATE qmdict_core Qt6::Widgets Qt6::Network)
 
 # Single source of truth for the version, so the About box and the release
 # artefacts cannot drift apart.
