@@ -35,6 +35,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
@@ -121,6 +122,7 @@ private:
     QVector<QAction *> m_themeActions;
 
     QSystemTrayIcon *m_tray = nullptr;
+    QString m_clipboardText;
     bool m_quitting = false;
 
     QStringList m_history;

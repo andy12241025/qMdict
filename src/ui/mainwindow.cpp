@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
+#include <QClipboard>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -31,6 +32,7 @@
 #include <QToolBar>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QShowEvent>
 
 namespace qmdict {
 namespace {
@@ -72,6 +74,13 @@ MainWindow::MainWindow(const QString &cacheDir, QWidget *parent)
     buildActions();
     restoreSettings();
     setupTrayIcon();
+
+    if (QClipboard *clipboard = QApplication::clipboard()) {
+        m_clipboardText = clipboard->text(QClipboard::Clipboard);
+        connect(clipboard, &QClipboard::dataChanged, this, [this, clipboard]() {
+            m_clipboardText = clipboard->text(QClipboard::Clipboard);
+        });
+    }
 
     connect(&m_library, &Library::loadingStarted, this, [this](int total) {
         m_status->setText(QStringLiteral("Indexing %1 dictionaries...").arg(total));
@@ -487,12 +496,23 @@ void MainWindow::toggleWindowVisible()
     raise();
     activateWindow();
 
-    // Coming back from the tray means a new word, so the box is emptied rather
-    // than left holding the last one for the reader to clear first. The list
-    // falls back to recent lookups, which is where an empty box leads anyway.
-    m_search->clear();
-    m_searchTimer->stop();
-    updateSuggestions();
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+
+    // The clipboard is sampled when qMdict becomes visible. This makes a
+    // copied word ready for lookup immediately after reopening from the tray,
+    // while clipboard monitoring keeps the cached value current.
+    const QString word = m_clipboardText.trimmed();
+    if (word.isEmpty() || word == m_search->text().trimmed()) {
+        m_search->setFocus();
+        return;
+    }
+
+    m_search->setText(word);
+    m_search->selectAll();
     m_search->setFocus();
 }
 
