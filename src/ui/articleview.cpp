@@ -329,6 +329,7 @@ void ArticleView::mousePressEvent(QMouseEvent *event)
                         m_collapsed[articleIndex] = !m_collapsed.at(articleIndex);
                         rebuild();
                     }
+                    m_titleBarPressHandled = true;
                     return;
                 }
 
@@ -342,6 +343,15 @@ void ArticleView::mousePressEvent(QMouseEvent *event)
         }
     }
     QTextBrowser::mousePressEvent(event);
+}
+
+void ArticleView::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && m_titleBarPressHandled) {
+        m_titleBarPressHandled = false;
+        return;
+    }
+    QTextBrowser::mouseReleaseEvent(event);
 }
 
 void ArticleView::contextMenuEvent(QContextMenuEvent *event)

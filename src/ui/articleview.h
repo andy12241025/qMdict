@@ -81,6 +81,7 @@ signals:
 protected:
     QVariant loadResource(int type, const QUrl &name) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
 
@@ -105,6 +106,7 @@ private:
     QString m_word;
     QVector<Article> m_articles;
     QVector<bool> m_collapsed;
+    bool m_titleBarPressHandled = false;
     bool m_useDictionaryStyles = true;
     qreal m_fontPointSize = kDefaultFontPointSize;
     QAction *m_backAction = nullptr;
