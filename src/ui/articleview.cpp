@@ -11,6 +11,7 @@
 #include <QMouseEvent>
 #include <QRegularExpression>
 #include <QScrollBar>
+#include <QTextBlock>
 #include <QUrl>
 
 namespace qmdict {
@@ -46,6 +47,16 @@ ArticleView::ArticleView(QWidget *parent)
     connect(this, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) {
         const QString raw = url.toString();
         const QString scheme = url.scheme().toLower();
+
+        if (scheme == QLatin1String("qmdict-collapse")) {
+            bool ok = false;
+            const int index = raw.mid(QStringLiteral("qmdict-collapse:").size()).toInt(&ok);
+            if (ok && index >= 0 && index < m_collapsed.size()) {
+                m_collapsed[index] = !m_collapsed.at(index);
+                rebuild();
+            }
+            return;
+        }
 
         if (scheme == QLatin1String("http") || scheme == QLatin1String("https") ||
             scheme == QLatin1String("mailto") || scheme == QLatin1String("file") ||
@@ -110,6 +121,7 @@ void ArticleView::showArticles(const QString &word, const QVector<Article> &arti
 {
     m_word = word;
     m_articles = articles;
+    m_collapsed.fill(false, m_articles.size());
     rebuild();
 }
 
@@ -117,6 +129,7 @@ void ArticleView::showMessage(const QString &title, const QString &body)
 {
     m_word.clear();
     m_articles.clear();
+    m_collapsed.clear();
 
     document()->setDefaultStyleSheet(theme::articleBaseCss(m_fontPointSize));
     setHtml(QStringLiteral("<h3>%1</h3><p class=\"qmdict-empty\">%2</p>")
@@ -217,10 +230,18 @@ void ArticleView::rebuild()
     QString body;
     body.reserve(4096);
 
-    for (const Article &article : m_articles) {
+    for (int index = 0; index < m_articles.size(); ++index) {
+        const Article &article = m_articles.at(index);
         const QString name = article.dictionary ? article.dictionary->title() : article.source;
-        if (!name.isEmpty())
-            body += QStringLiteral("<p class=\"qmdict-source\">%1</p>\n").arg(name.toHtmlEscaped());
+        if (!name.isEmpty()) {
+            const QString label = QStringLiteral("%1 %2")
+                                      .arg(m_collapsed.value(index) ? QStringLiteral("▸")
+                                                                     : QStringLiteral("▾"),
+                                           name.toHtmlEscaped());
+            body += QStringLiteral("<p class=\"qmdict-source\"><a class=\"qmdict-source-toggle\" href=\"qmdict-collapse:%1\">%2</a></p>\n")
+                        .arg(index)
+                        .arg(label);
+        }
 
         QString html = sanitise(article.html);
         if (article.dictionary) {
@@ -232,7 +253,8 @@ void ArticleView::rebuild()
             html = htmlblocks::adaptForTextDocument(html, rules);
         }
 
-        body += html;
+        if (!m_collapsed.value(index))
+            body += html;
         body += QLatin1String("\n");
     }
 
@@ -291,6 +313,35 @@ void ArticleView::forgetDictionaries()
     m_fontAliases.clear();
     m_articles.clear();
     m_word.clear();
+}
+
+void ArticleView::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        const QTextBlock block = cursorForPosition(event->position().toPoint()).block();
+        const QString text = block.text();
+        if (text.startsWith(QStringLiteral("▾ ")) || text.startsWith(QStringLiteral("▸ "))) {
+            int articleIndex = 0;
+            for (QTextBlock candidate = document()->begin(); candidate.isValid();
+                 candidate = candidate.next()) {
+                if (candidate == block) {
+                    if (articleIndex < m_collapsed.size()) {
+                        m_collapsed[articleIndex] = !m_collapsed.at(articleIndex);
+                        rebuild();
+                    }
+                    return;
+                }
+
+                // Only articles with a source name produce a title block.
+                // The generated title text lets us advance to the next such
+                // article without depending on hyperlink formatting.
+                if (candidate.text().startsWith(QStringLiteral("▾ ")) ||
+                    candidate.text().startsWith(QStringLiteral("▸ ")))
+                    ++articleIndex;
+            }
+        }
+    }
+    QTextBrowser::mousePressEvent(event);
 }
 
 void ArticleView::contextMenuEvent(QContextMenuEvent *event)

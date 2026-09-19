@@ -141,7 +141,8 @@ QString articleBaseCss(qreal pointSize)
                "a { color: %2; text-decoration: none; }\n"
                "hr.qmdict-sep { border: 0; height: 1px; background: %3; }\n"
                ".qmdict-source { color: %4; background: %5; font-size: %7pt;\n"
-               "  padding: 2px 6px; margin: 0 0 6px 0; }\n"
+               "  padding: 0; margin: 0 0 6px 0; }\n"
+               ".qmdict-source-toggle { display: block; padding: 2px 6px; }\n"
                ".qmdict-empty { color: %4; font-style: italic; }\n")
         .arg(foreground, link, rule, muted, chip)
         .arg(pointSize, 0, 'f', 1)
