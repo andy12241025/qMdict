@@ -931,8 +931,16 @@ void testHtmlBlocks()
               QStringLiteral("<div><und>a</und></div>"),
           "css comments are stripped before parsing");
     check(apply(QStringLiteral("unbox[type=\"colloc\"]{display:block}"),
-                QStringLiteral("<unbox>a</unbox>")) == QStringLiteral("<div><unbox>a</unbox></div>"),
-          "attribute selectors still yield their element");
+                QStringLiteral("<unbox type=\"colloc\">a</unbox>")) ==
+              QStringLiteral("<div><unbox type=\"colloc\">a</unbox></div>"),
+          "an attribute selector matches the element carrying it");
+    check(apply(QStringLiteral("unbox[type=\"colloc\"]{display:block}"),
+                QStringLiteral("<unbox>a</unbox>")) == QStringLiteral("<unbox>a</unbox>"),
+          "and leaves alone the one that does not");
+    check(apply(QStringLiteral("unbox[type]{display:block}"),
+                QStringLiteral("<unbox type=\"grammar\">a</unbox>")) ==
+              QStringLiteral("<div><unbox type=\"grammar\">a</unbox></div>"),
+          "an attribute is enough on its own");
 
     // Nesting and balance.
     checkEqual(apply(QStringLiteral("top-g{display:block}"),
@@ -1056,6 +1064,100 @@ void testHtmlBlocks()
                QByteArrayLiteral("<a href=\"sound://a.spx\">s</a>"), "an audio link is kept");
     checkEqual(adaptForTextDocument(QStringLiteral("<a href=\"help:x\"><b>t</b></a>"), none).toUtf8(),
                QByteArrayLiteral("<b>t</b>"), "markup inside a dead link survives");
+
+    // --- contradicting rules ----------------------------------------------
+
+    // Oxford lays <und> out as a block and then puts it back inline inside an
+    // <inlinelist>, where a list of synonyms belongs on one line.
+    const QString contested = QStringLiteral(
+        "und{display:block}unbox und{display:block}unbox inlinelist und{display:inline}");
+    checkEqual(apply(contested, QStringLiteral("<unbox><inlinelist><und>a</und></inlinelist></unbox>"))
+                   .toUtf8(),
+               QByteArrayLiteral("<unbox><inlinelist><und>a</und></inlinelist></unbox>"),
+               "the selector that says more about an element wins");
+    checkEqual(apply(contested, QStringLiteral("<unbox><und>a</und></unbox>")).toUtf8(),
+               QByteArrayLiteral("<unbox><div><und>a</und></div></unbox>"),
+               "and elsewhere the block rule still stands");
+    checkEqual(apply(QStringLiteral("e{display:inline}e{display:block}"),
+                     QStringLiteral("<e>a</e>")).toUtf8(),
+               QByteArrayLiteral("<div><e>a</e></div>"),
+               "between equals, the later rule wins");
+
+    // A break running into a block draws an empty line, since the block was
+    // going to start on one anyway. Oxford puts one before every translation.
+    const QString broken = QStringLiteral("chn{display:block}");
+    checkEqual(apply(broken, QStringLiteral("<x>a.<xhtml:br></xhtml:br><chn>b</chn></x>")).toUtf8(),
+               QByteArrayLiteral("<x>a.<div><chn>b</chn></div></x>"),
+               "a break before a block is dropped");
+    checkEqual(apply(broken, QStringLiteral("<x>a<xhtml:br></xhtml:br>b</x>")).toUtf8(),
+               QByteArrayLiteral("<x>a<br>b</x>"), "a break between text is kept");
+
+    // --- text the stylesheet draws itself ---------------------------------
+
+    // Qt has no generated content, so a :before rule becomes markup, in an
+    // element of its own that carries the rule's other declarations.
+    LayoutRules numbered = rulesFromStyleSheet(
+        QStringLiteral("sn:before{content:'note '; color:#123456}"));
+    checkEqual(adaptForTextDocument(QStringLiteral("<sn>a</sn>"), numbered).toUtf8(),
+               QByteArrayLiteral("<sn><qmdict-g0>note </qmdict-g0>a</sn>"),
+               "a :before rule is drawn in front of its element");
+    checkEqual(numbered.extraCss.trimmed().toUtf8(), QByteArrayLiteral("qmdict-g0{color:#123456}"),
+               "and keeps the rest of the rule");
+
+    checkEqual(adaptForTextDocument(
+                   QStringLiteral("<sn>a</sn>"),
+                   rulesFromStyleSheet(QStringLiteral("sn:after{content:'!'}"))).toUtf8(),
+               QByteArrayLiteral("<sn>a!</sn>"),
+               "an :after rule is drawn behind it, bare when it styles nothing");
+    checkEqual(adaptForTextDocument(
+                   QStringLiteral("<sn>a</sn>"),
+                   rulesFromStyleSheet(QStringLiteral("sn:before{content:counter(c)}"))).toUtf8(),
+               QByteArrayLiteral("<sn>a</sn>"), "a counter is not text this can produce");
+
+    // attr() is how these stylesheets number a list, which matters because Qt
+    // restarts its own numbering for every one of them.
+    LayoutRules counted = rulesFromStyleSheet(
+        QStringLiteral("ol[start]:before{content:attr(start)'.'}"));
+    checkEqual(adaptForTextDocument(QStringLiteral("<ol start=\"4\"><li>a</li></ol>"), counted)
+                   .toUtf8(),
+               QByteArrayLiteral("<ol start=\"4\" style=\"list-style-type:none\"><li>4.a</li></ol>"),
+               "a list numbered by the stylesheet keeps that number and drops Qt's");
+
+    // Oxford blanks the key emoji in front of a headword and puts an
+    // icon-font glyph in its place; hiding the one must not lose the other.
+    LayoutRules icon = rulesFromStyleSheet(QStringLiteral(
+        "symbol[type=key]{visibility:hidden}symbol[type=key]:after{visibility:visible;content:'K'}"));
+    checkEqual(adaptForTextDocument(QStringLiteral("<symbol type=\"key\">X</symbol>"), icon).toUtf8(),
+               QByteArrayLiteral("K"),
+               "a hidden element still draws the glyph meant to replace it");
+
+    // A border needs a table: Qt draws one for nothing else.
+    LayoutRules boxed =
+        rulesFromStyleSheet(QStringLiteral("unbox{display:block;border:2px solid #0088DD;padding:6px}"));
+    checkEqual(adaptForTextDocument(QStringLiteral("<unbox>a</unbox>"), boxed).toUtf8(),
+               QByteArrayLiteral("<table class=\"qmdict-b0\" width=\"100%\" border=\"2\" "
+                                 "cellspacing=\"0\" cellpadding=\"6\"><tr><td>"
+                                 "<unbox>a</unbox></td></tr></table>"),
+               "a bordered block becomes a single-celled table");
+    check(boxed.extraCss.contains(QStringLiteral("table.qmdict-b0")),
+          "and the box rules follow it there");
+
+    LayoutRules shaded =
+        rulesFromStyleSheet(QStringLiteral("un{display:block;background:#222;margin:4px}"));
+    checkEqual(adaptForTextDocument(QStringLiteral("<un>a</un>"), shaded).toUtf8(),
+               QByteArrayLiteral("<div class=\"qmdict-b0\"><un>a</un></div>"),
+               "a block without a border stays a div");
+
+    // The child combinator: Oxford puts the same arrow in front of "x-g-blk>x"
+    // and of the recorded example inside it, and reading one as the other
+    // draws the arrow twice.
+    LayoutRules childOnly = rulesFromStyleSheet(QStringLiteral("g>x:before{content:'>'}"));
+    checkEqual(adaptForTextDocument(QStringLiteral("<g><x>a</x></g>"), childOnly).toUtf8(),
+               QByteArrayLiteral("<g><x>&gt;a</x></g>"),
+               "a child selector matches a child");
+    checkEqual(adaptForTextDocument(QStringLiteral("<g><m><x>a</x></m></g>"), childOnly).toUtf8(),
+               QByteArrayLiteral("<g><m><x>a</x></m></g>"),
+               "and not a grandchild");
 }
 
 // --- stylesheet filtering -------------------------------------------------

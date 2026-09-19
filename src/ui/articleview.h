@@ -7,6 +7,7 @@
 #pragma once
 
 #include "cssfilter.h"
+#include "dictfonts.h"
 #include "htmlblocks.h"
 
 #include <QHash>
@@ -95,6 +96,11 @@ private:
     // while the dictionary is open.
     const htmlblocks::LayoutRules &layoutRulesFor(Dictionary *dictionary, const QString &articleHtml);
 
+    // Registers the faces a dictionary embeds in its stylesheet, once, and
+    // remembers what Qt ended up calling them.
+    const QHash<QString, QString> &fontAliasesFor(Dictionary *dictionary,
+                                                  const QString &articleHtml);
+
     QString m_word;
     QVector<Article> m_articles;
     bool m_useDictionaryStyles = true;
@@ -104,6 +110,7 @@ private:
     QAction *m_clearHistoryAction = nullptr;
     QHash<Dictionary *, htmlblocks::LayoutRules> m_layoutRules;
     QHash<Dictionary *, QString> m_usableStyles;
+    QHash<Dictionary *, QHash<QString, QString>> m_fontAliases;
 };
 
 } // namespace qmdict

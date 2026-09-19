@@ -137,10 +137,21 @@ QString ArticleView::collectStyles()
         // Only the rules Qt can act on, and of those only the ones this
         // article can actually match. On a long Oxford entry that removes
         // about a second of selector matching.
+        const QHash<QString, QString> &aliases = fontAliasesFor(article.dictionary, article.html);
+
         const QString embedded = cssfilter::relevantTo(
             usableStyleSheetFor(article.dictionary, article.html), article.html);
         if (!embedded.isEmpty())
-            css += QLatin1Char('\n') + theme::adaptStyleSheetForDark(embedded);
+            css += QLatin1Char('\n') +
+                   dictfonts::applyAliases(theme::adaptStyleSheetForDark(embedded), aliases);
+
+        // The rules behind the text the dictionary draws itself, which moved
+        // off their pseudo-elements and onto elements this rendering inserts.
+        const QString generated =
+            cssfilter::usable(layoutRulesFor(article.dictionary, article.html).extraCss);
+        if (!generated.isEmpty())
+            css += QLatin1Char('\n') +
+                   dictfonts::applyAliases(theme::adaptStyleSheetForDark(generated), aliases);
     }
 
     // The theme rules come last so headword colours stay readable even when a
@@ -156,6 +167,22 @@ const QString &ArticleView::usableStyleSheetFor(Dictionary *dictionary, const QS
 
     return *m_usableStyles.insert(dictionary,
                                   cssfilter::usable(dictionary->styleSheetFor(articleHtml)));
+}
+
+const QHash<QString, QString> &ArticleView::fontAliasesFor(Dictionary *dictionary,
+                                                           const QString &articleHtml)
+{
+    const auto cached = m_fontAliases.constFind(dictionary);
+    if (cached != m_fontAliases.constEnd())
+        return cached.value();
+
+    // The unfiltered stylesheet: @font-face is one of the at-rules the filter
+    // removes, and the face it names may live inside the .mdd.
+    return *m_fontAliases.insert(
+        dictionary, dictfonts::install(dictionary->styleSheetFor(articleHtml),
+                                       [dictionary](const QString &name) {
+                                           return dictionary->resource(name);
+                                       }));
 }
 
 const htmlblocks::LayoutRules &ArticleView::layoutRulesFor(Dictionary *dictionary,
@@ -235,6 +262,7 @@ void ArticleView::warmUp(Dictionary *dictionary, const QString &articleHtml)
     // .mdd archive, filtered, and parsed a second time for its layout rules.
     const QString &styles = usableStyleSheetFor(dictionary, articleHtml);
     layoutRulesFor(dictionary, articleHtml);
+    fontAliasesFor(dictionary, articleHtml);
 
     // Qt resolves a font family the first time a stylesheet applies it, by
     // asking the platform's font matcher. Dictionaries name fonts they ship
@@ -260,6 +288,7 @@ void ArticleView::forgetDictionaries()
 {
     m_usableStyles.clear();
     m_layoutRules.clear();
+    m_fontAliases.clear();
     m_articles.clear();
     m_word.clear();
 }
