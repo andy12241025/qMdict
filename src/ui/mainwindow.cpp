@@ -256,6 +256,7 @@ void MainWindow::buildActions()
     fileMenu->addAction(quitAction);
 
     m_backAction = makeAction(QStringLiteral("&Back"), &MainWindow::goBack, QKeySequence::Back);
+    m_backAction->setShortcuts({QKeySequence::Back, QKeySequence(Qt::Key_Backspace)});
     m_forwardAction =
         makeAction(QStringLiteral("&Forward"), &MainWindow::goForward, QKeySequence::Forward);
     auto *focusAction = makeAction(QStringLiteral("Focus &Search"),

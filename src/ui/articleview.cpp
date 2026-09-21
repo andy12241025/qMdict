@@ -251,6 +251,25 @@ void ArticleView::rebuild()
                 m_useDictionaryStyles ? layoutRulesFor(article.dictionary, article.html)
                                       : htmlblocks::LayoutRules{};
             html = htmlblocks::adaptForTextDocument(html, rules);
+            // Qt does not reliably apply font sizes on custom dictionary
+            // elements. Use a native span inside Oxford's POS badge, with an
+            // explicit size and normal lettering instead of small caps.
+            static const QRegularExpression posText(
+                QStringLiteral("(<pos\\b[^>]*>)([^<>]+)(</pos\\s*>)"),
+                QRegularExpression::CaseInsensitiveOption);
+            html.replace(posText,
+                         QStringLiteral("\\1<span style=\"font-size: %1pt; font-variant: normal;\">\\2</span>\\3")
+                             .arg(m_fontPointSize * 1.1, 0, 'f', 1));
+
+            // Oxford's target headword is a custom <h> element. Give its text
+            // an explicit size because QTextDocument does not consistently
+            // apply relative font sizes to custom elements.
+            static const QRegularExpression headwordText(
+                QStringLiteral("(<h\\b[^>]*>)([^<>]+)(</h\\s*>)"),
+                QRegularExpression::CaseInsensitiveOption);
+            html.replace(headwordText,
+                         QStringLiteral("\\1<span style=\"font-size: %1pt;\">\\2</span>\\3")
+                             .arg(m_fontPointSize * 1.3, 0, 'f', 1));
         }
 
         if (!m_collapsed.value(index))
@@ -317,6 +336,13 @@ void ArticleView::forgetDictionaries()
 
 void ArticleView::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() == Qt::XButton1) {
+        if (m_backAction)
+            m_backAction->trigger();
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton) {
         const QTextBlock block = cursorForPosition(event->position().toPoint()).block();
         const QString text = block.text();
