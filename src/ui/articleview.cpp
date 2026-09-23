@@ -270,6 +270,15 @@ void ArticleView::rebuild()
             html.replace(headwordText,
                          QStringLiteral("\\1<span style=\"font-size: %1pt;\">\\2</span>\\3")
                              .arg(m_fontPointSize * 1.3, 0, 'f', 1));
+
+            // Cambridge opens each article with a plain <b>headword</b> and
+            // no class to style it by, so size that leading bold run directly.
+            static const QRegularExpression leadingBold(
+                QStringLiteral("^(\\s*<b>)([^<>]+)(</b>)"),
+                QRegularExpression::CaseInsensitiveOption);
+            html.replace(leadingBold,
+                         QStringLiteral("\\1<span style=\"font-size: %1pt;\">\\2</span>\\3")
+                             .arg(m_fontPointSize * 1.3, 0, 'f', 1));
         }
 
         if (!m_collapsed.value(index))

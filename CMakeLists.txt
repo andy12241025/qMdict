@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(qMdict
-    VERSION 1.0.11
+    VERSION 1.0.12
     DESCRIPTION "Fast offline MDict (.mdx/.mdd) dictionary reader"
     LANGUAGES C CXX)
 
