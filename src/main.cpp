@@ -4,6 +4,8 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QIcon>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QSettings>
 
 #ifndef QMDICT_VERSION
@@ -80,10 +82,45 @@ int main(int argc, char *argv[])
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, portableRoot());
     }
 
+    // A second launch hands its folder argument to the running instance and
+    // exits, so repeated clicks on the launcher keep a single process.
+    const QString serverName =
+        QStringLiteral("qMdict-") + QString::fromLocal8Bit(qgetenv("USER")) +
+        (portable ? QStringLiteral("-portable-") + QString::number(qHash(portableRoot()))
+                  : QString());
+    const QStringList positional = parser.positionalArguments();
+
+    QLocalSocket probe;
+    probe.connectToServer(serverName);
+    if (probe.waitForConnected(500)) {
+        probe.write(positional.isEmpty() ? QByteArray("show")
+                                         : "open:" + positional.first().toUtf8());
+        probe.waitForBytesWritten(500);
+        probe.disconnectFromServer();
+        return 0;
+    }
+
     qmdict::MainWindow window(resolveCacheDirectory(portable));
     window.show();
 
-    const QStringList positional = parser.positionalArguments();
+    // A stale socket from a crashed run would block listen().
+    QLocalServer::removeServer(serverName);
+    QLocalServer server;
+    QObject::connect(&server, &QLocalServer::newConnection, &window, [&]() {
+        while (QLocalSocket *client = server.nextPendingConnection()) {
+            QObject::connect(client, &QLocalSocket::disconnected, client, &QObject::deleteLater);
+            QObject::connect(client, &QLocalSocket::readyRead, &window, [&window, client]() {
+                const QByteArray msg = client->readAll();
+                window.showNormal();
+                window.raise();
+                window.activateWindow();
+                if (msg.startsWith("open:"))
+                    window.openFolder(QString::fromUtf8(msg.mid(5)));
+            });
+        }
+    });
+    server.listen(serverName);
+
     if (!positional.isEmpty())
         window.openFolder(positional.first());
 
